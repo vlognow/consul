@@ -1203,6 +1203,11 @@ func makeHTTPFilter(opts listenerFilterOpts) (*envoylistener.Filter, error) {
 			// sampled.
 			RandomSampling: &envoytype.Percent{Value: 0.0},
 		},
+		UpgradeConfigs: []*envoyhttp.HttpConnectionManager_UpgradeConfig{
+			&envoyhttp.HttpConnectionManager_UpgradeConfig{
+				UpgradeType: "websocket",
+			},
+		},
 	}
 
 	if opts.useRDS {
