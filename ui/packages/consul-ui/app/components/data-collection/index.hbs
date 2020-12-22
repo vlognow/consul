@@ -1,7 +1,15 @@
 {{did-update (action (fn (set this 'term') '') @search)}}
-{{yield (hash
-  search=(action this.search)
-  items=this.items
-  Collection=(if (gt this.items.length 0) (component 'anonymous') '')
-  Empty=(if (eq this.items.length 0) (component 'anonymous') '')
-)}}
+<PagedCollection
+  @type={{@pager}}
+  @page={{@page}}
+  @perPage={{@perPage}}
+  @items={{this.items}}
+as |pager|>
+  {{yield (hash
+    search=(action this.search)
+    items=pager.items
+    Collection=(if (gt this.items.length 0) (component 'anonymous') '')
+    Empty=(if (eq this.items.length 0) (component 'anonymous') '')
+    Pager=pager.Pager
+  )}}
+</PagedCollection>
