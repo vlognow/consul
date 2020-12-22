@@ -1,0 +1,28 @@
+{{#if (eq this.type "virtual-scroll")}}
+  <style>
+  {{#let
+      (concat '[data-collection-' this.guid ']::before')
+      (concat '[data-collection-' this.guid ']::after')
+    as |start end|}}
+    {{start}},
+    {{end}} {
+      content: "";
+      display: block;
+    }
+    {{start}} {
+      height: {{this.startHeight}}px;
+    }
+    {{end}} {
+      height: {{this.endHeight}}px;
+    }
+  {{/let}}
+  </style>
+  {{#if (not this.$pane)}}
+    <meta {{did-insert this.connect}} />
+  {{/if}}
+  {{will-destroy this.disconnect}}
+{{/if}}
+{{yield (hash
+  items=this.items
+  Pager=(if (eq type "index") (component 'anonymous') '')
+)}}
