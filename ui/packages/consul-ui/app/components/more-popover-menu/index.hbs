@@ -4,7 +4,7 @@
 >
   <PopoverMenu
     @expanded={{expanded}}
-    @onchange={{action onchange}}
+    @onchange={{action (optional onchange)}}
     @keyboardAccess={{false}}
   as |components api|>
     <BlockSlot @name="trigger">

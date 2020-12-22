@@ -60,6 +60,7 @@ as |sort filters items|}}
     </BlockSlot>
     <BlockSlot @name="content">
       <DataCollection
+        @pager="virtual-scroll"
         @type="service"
         @sort={{sort.value}}
         @filters={{filters}}

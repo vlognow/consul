@@ -37,12 +37,12 @@
   @extend %with-minus-square-fill-mask, %as-pseudo;
   color: $gray-400;
 }
-%popover-select.type-source li button {
-  text-transform: capitalize;
-}
-%popover-select.type-source li.aws button {
-  text-transform: uppercase;
-}
+// %popover-select.type-source li button {
+//   text-transform: capitalize;
+// }
+// %popover-select.type-source li.aws button {
+//   text-transform: uppercase;
+// }
 %popover-select .aws button::before {
   @extend %with-logo-aws-color-icon, %as-pseudo;
 }

@@ -1,13 +1,16 @@
 @import './composite-row/index';
 
-.list-collection > ul > li:not(:first-child) {
+.list-collection > ul > li {
   @extend %composite-row;
+}
+%composite-row .menu-panel {
+  z-index: 1;
 }
 /* hoverable rows */
 %composite-row.linkable,
 .consul-service-instance-list > ul > li:not(:first-child),
-.consul-node-list > ul > li:not(:first-child),
-.consul-token-list > ul > li:not(:first-child),
+.consul-node-list > ul > li,
+.consul-token-list > ul > li,
 .consul-policy-list > ul > li:not(:first-child),
 .consul-role-list > ul > li:not(:first-child) {
   @extend %with-composite-row-intent;
@@ -18,7 +21,7 @@
 // TODO: This hides the icons-less dt's in the below lists as they don't have
 // tooltips the todo would be to wrap these texts in spans
 .consul-nspace-list > ul > li:not(:first-child) dt,
-.consul-token-list > ul > li:not(:first-child) dt,
+.consul-token-list > ul > li dt,
 .consul-policy-list > ul li:not(:first-child) dl:not(.datacenter) dt,
 .consul-role-list > ul > li:not(:first-child) dt {
   display: none;
