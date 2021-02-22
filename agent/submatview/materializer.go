@@ -80,6 +80,15 @@ func NewMaterializer(deps Deps) *Materializer {
 		retryWaiter: deps.Waiter,
 		updateCh:    make(chan struct{}),
 	}
+	if deps.Waiter == nil {
+		v.retryWaiter = &retry.Waiter{
+			MinFailures: 1,
+			Factor:      200 * time.Millisecond,
+			MinWait:     0,
+			MaxWait:     60 * time.Second,
+			Jitter:      retry.NewJitter(100),
+		}
+	}
 	return v
 }
 
