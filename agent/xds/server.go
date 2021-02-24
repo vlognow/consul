@@ -2,12 +2,9 @@ package xds
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
-
-	"github.com/hashicorp/consul/logging"
 
 	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_discovery_v2 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
@@ -24,6 +21,7 @@ import (
 	"github.com/hashicorp/consul/acl"
 	"github.com/hashicorp/consul/agent/proxycfg"
 	"github.com/hashicorp/consul/agent/structs"
+	"github.com/hashicorp/consul/logging"
 	"github.com/hashicorp/consul/tlsutil"
 )
 
@@ -170,7 +168,7 @@ const (
 )
 
 func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.DiscoveryRequest) error {
-	logger := s.Logger.Named(logging.XDS)
+	logger := s.Logger.Named(logging.XDS).With("xds", "full")
 
 	// xDS requires a unique nonce to correlate response/request pairs
 	var nonce uint64
@@ -185,6 +183,7 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 	// Loop state
 	var (
 		cfgSnap       *proxycfg.ConfigSnapshot
+		delta         *DeltaSnapshot
 		req           *envoy_discovery_v3.DiscoveryRequest
 		node          *envoy_config_core_v3.Node
 		proxyFeatures supportedProxyFeatures
@@ -193,6 +192,7 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 		watchCancel   func()
 		proxyID       structs.ServiceID
 	)
+	delta = newDeltaSnapshot()
 
 	// need to run a small state machine to get through initial authentication.
 	var state = stateInit
@@ -310,6 +310,21 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 		case cfgSnap = <-stateCh:
 			// We got a new config, update the version counter
 			configVersion++
+
+			// TODO: for SoTW do bulk xDS here
+
+			// Convert the whole thing to xDS protos.
+			newRes := make(map[string][]proto.Message)
+			// for _, typeURL := range []string{ClusterType, EndpointType, RouteType, ListenerType} {
+			for typeURL, handler := range handlers {
+				res, err := handler.Generate(cfgSnap)
+				if err != nil {
+					return err
+				}
+				newRes[typeURL] = res
+			}
+			delta.Accept(newRes)
+			// TODO: trigger delta update?
 		}
 
 		// Trigger state machine
@@ -416,6 +431,14 @@ func (t *xDSType) Recv(req *envoy_discovery_v3.DiscoveryRequest, node *envoy_con
 	}
 }
 
+func (t *xDSType) Generate(cfgSnap *proxycfg.ConfigSnapshot) ([]proto.Message, error) {
+	cInfo := connectionInfo{
+		Token:         tokenFromContext(t.stream.Context()),
+		ProxyFeatures: t.proxyFeatures,
+	}
+	return t.resources(cInfo, cfgSnap)
+}
+
 func (t *xDSType) SendIfNew(cfgSnap *proxycfg.ConfigSnapshot, version uint64, nonce *uint64) error {
 	if t.req == nil {
 		return nil
@@ -425,11 +448,7 @@ func (t *xDSType) SendIfNew(cfgSnap *proxycfg.ConfigSnapshot, version uint64, no
 		return nil
 	}
 
-	cInfo := connectionInfo{
-		Token:         tokenFromContext(t.stream.Context()),
-		ProxyFeatures: t.proxyFeatures,
-	}
-	resources, err := t.resources(cInfo, cfgSnap)
+	resources, err := t.Generate(cfgSnap)
 	if err != nil {
 		return err
 	}
@@ -478,11 +497,6 @@ func tokenFromContext(ctx context.Context) string {
 		return toks[0]
 	}
 	return ""
-}
-
-// DeltaAggregatedResources implements envoy_discovery_v3.AggregatedDiscoveryServiceServer
-func (s *Server) DeltaAggregatedResources(_ envoy_discovery_v3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer) error {
-	return errors.New("not implemented")
 }
 
 // GRPCServer returns a server instance that can handle xDS requests.
