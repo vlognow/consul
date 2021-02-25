@@ -9,9 +9,10 @@ import (
 )
 
 type Client struct {
-	NetRPC    NetRPC
-	Cache     CacheGetter
-	ViewStore MaterializedViewStore
+	NetRPC           NetRPC
+	Cache            CacheGetter
+	ViewStore        MaterializedViewStore
+	MaterializerDeps MaterializerDeps
 	// CacheName to use for service health.
 	CacheName string
 	// CacheNameConnect is the name of the cache to use for connect service health.
@@ -61,6 +62,20 @@ func (c *Client) getServiceNodes(
 		return out, cache.ResultMeta{}, err
 	}
 
+	if req.Source.Node == "" {
+		sr, err := newServiceRequest(req, c.MaterializerDeps)
+		if err != nil {
+			return out, cache.ResultMeta{}, err
+		}
+
+		result, err := c.ViewStore.Get(ctx, sr)
+		if err != nil {
+			return out, cache.ResultMeta{}, err
+		}
+		// TODO: can we store non-pointer
+		return *result.Value.(*structs.IndexedCheckServiceNodes), cache.ResultMeta{Index: result.Index}, err
+	}
+
 	cacheName := c.CacheName
 	if req.Connect {
 		cacheName = c.CacheNameConnect
@@ -77,4 +92,39 @@ func (c *Client) getServiceNodes(
 	}
 
 	return *value, md, nil
+}
+
+func newServiceRequest(req structs.ServiceSpecificRequest, deps MaterializerDeps) (serviceRequest, error) {
+	view, err := newHealthView(req)
+	if err != nil {
+		return serviceRequest{}, err
+	}
+	return serviceRequest{
+		ServiceSpecificRequest: req,
+		view:                   view,
+		deps:                   deps,
+	}, nil
+}
+
+type serviceRequest struct {
+	structs.ServiceSpecificRequest
+	view *healthView
+	deps MaterializerDeps
+}
+
+func (r serviceRequest) CacheInfo() cache.RequestInfo {
+	return r.ServiceSpecificRequest.CacheInfo()
+}
+
+func (r serviceRequest) Type() string {
+	return "service-health"
+}
+
+func (r serviceRequest) NewMaterializer() *submatview.Materializer {
+	return submatview.NewMaterializer(submatview.Deps{
+		View:    r.view,
+		Client:  r.deps.Client,
+		Logger:  r.deps.Logger,
+		Request: newMaterializerRequest(r.ServiceSpecificRequest),
+	})
 }
