@@ -1,7 +1,6 @@
-package cachetype
+package health
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -11,7 +10,6 @@ import (
 	"github.com/hashicorp/go-bexpr"
 	"github.com/hashicorp/go-hclog"
 
-	"github.com/hashicorp/consul/agent/cache"
 	"github.com/hashicorp/consul/agent/structs"
 	"github.com/hashicorp/consul/agent/submatview"
 	"github.com/hashicorp/consul/lib/retry"
@@ -19,56 +17,20 @@ import (
 	"github.com/hashicorp/consul/proto/pbsubscribe"
 )
 
-const (
-	// Recommended name for registration.
-	StreamingHealthServicesName = "streaming-health-services"
-)
-
-// StreamingHealthServices supports fetching discovering service instances via the
-// catalog using the streaming gRPC endpoint.
-type StreamingHealthServices struct {
-	RegisterOptionsBlockingRefresh
-	deps MaterializerDeps
-}
-
-// RegisterOptions returns options with a much shorter LastGetTTL than the default.
-// Unlike other cache-types, StreamingHealthServices runs a materialized view in
-// the background which will receive streamed events from a server. If the cache
-// is not being used, that stream uses memory on the server and network transfer
-// between the client and the server.
-// The materialize view and the stream are stopped when the cache entry expires,
-// so using a shorter TTL ensures the cache entry expires sooner.
-func (c *StreamingHealthServices) RegisterOptions() cache.RegisterOptions {
-	opts := c.RegisterOptionsBlockingRefresh.RegisterOptions()
-	opts.LastGetTTL = 20 * time.Minute
-	return opts
-}
-
-// NewStreamingHealthServices creates a cache-type for watching for service
-// health results via streaming updates.
-func NewStreamingHealthServices(deps MaterializerDeps) *StreamingHealthServices {
-	return &StreamingHealthServices{deps: deps}
-}
-
 type MaterializerDeps struct {
 	Client submatview.StreamClient
 	Logger hclog.Logger
 }
 
-// Fetch service health from the materialized view. If no materialized view
-// exists, create one and start it running in a goroutine. The goroutine will
-// exit when the cache entry storing the result is expired, the cache will call
-// Close on the result.State.
-//
-// Fetch implements part of the cache.Type interface, and assumes that the
-// caller ensures that only a single call to Fetch is running at any time.
-func (c *StreamingHealthServices) Fetch(opts cache.FetchOptions, req cache.Request) (cache.FetchResult, error) {
-	if opts.LastResult != nil && opts.LastResult.State != nil {
-		return opts.LastResult.State.(*streamingHealthState).Fetch(opts)
-	}
+func newMaterializerRequest(srvReq *structs.ServiceSpecificRequest) func(index uint64) pbsubscribe.SubscribeRequest {
+	// conn, err := bd.GRPCConnPool.ClientConn(bd.RuntimeConfig.Datacenter)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		matDeps := cachetype.MaterializerDeps{
+	//			Client: pbsubscribe.NewStateChangeSubscriptionClient(conn),
 
-	srvReq := req.(*structs.ServiceSpecificRequest)
-	newReqFn := func(index uint64) pbsubscribe.SubscribeRequest {
+	return func(index uint64) pbsubscribe.SubscribeRequest {
 		req := pbsubscribe.SubscribeRequest{
 			Topic:      pbsubscribe.Topic_ServiceHealth,
 			Key:        srvReq.ServiceName,
@@ -82,20 +44,6 @@ func (c *StreamingHealthServices) Fetch(opts cache.FetchOptions, req cache.Reque
 		}
 		return req
 	}
-
-	materializer, err := newMaterializer(c.deps, newReqFn, srvReq)
-	if err != nil {
-		return cache.FetchResult{}, err
-	}
-	ctx, cancel := context.WithCancel(context.TODO())
-	go materializer.Run(ctx)
-
-	state := &streamingHealthState{
-		materializer: materializer,
-		done:         ctx.Done(),
-		cancel:       cancel,
-	}
-	return state.Fetch(opts)
 }
 
 func newMaterializer(
@@ -119,25 +67,6 @@ func newMaterializer(
 		},
 		Request: newRequestFn,
 	}), nil
-}
-
-// streamingHealthState wraps a Materializer to manage its lifecycle, and to
-// add itself to the FetchResult.State.
-type streamingHealthState struct {
-	materializer *submatview.Materializer
-	done         <-chan struct{}
-	cancel       func()
-}
-
-func (s *streamingHealthState) Close() error {
-	s.cancel()
-	return nil
-}
-
-func (s *streamingHealthState) Fetch(opts cache.FetchOptions) (cache.FetchResult, error) {
-	result, err := s.materializer.getFromView(s.done, opts)
-	result.State = s
-	return result, err
 }
 
 func newHealthView(req *structs.ServiceSpecificRequest) (*healthView, error) {

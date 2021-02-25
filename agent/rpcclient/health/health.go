@@ -5,11 +5,13 @@ import (
 
 	"github.com/hashicorp/consul/agent/cache"
 	"github.com/hashicorp/consul/agent/structs"
+	"github.com/hashicorp/consul/agent/submatview"
 )
 
 type Client struct {
-	NetRPC NetRPC
-	Cache  CacheGetter
+	NetRPC    NetRPC
+	Cache     CacheGetter
+	ViewStore MaterializedViewStore
 	// CacheName to use for service health.
 	CacheName string
 	// CacheNameConnect is the name of the cache to use for connect service health.
@@ -22,6 +24,11 @@ type NetRPC interface {
 
 type CacheGetter interface {
 	Get(ctx context.Context, t string, r cache.Request) (interface{}, cache.ResultMeta, error)
+}
+
+type MaterializedViewStore interface {
+	Get(ctx context.Context, req submatview.Request) (submatview.Result, error)
+	Notify(ctx context.Context, req submatview.Request, cID string, ch chan<- cache.UpdateEvent) error
 }
 
 func (c *Client) ServiceNodes(
