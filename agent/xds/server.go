@@ -168,7 +168,7 @@ const (
 )
 
 func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.DiscoveryRequest) error {
-	logger := s.Logger.Named(logging.XDS).With("xds", "full")
+	logger := s.Logger.Named(logging.XDS).With("xDS", "SoTW")
 
 	// xDS requires a unique nonce to correlate response/request pairs
 	var nonce uint64
