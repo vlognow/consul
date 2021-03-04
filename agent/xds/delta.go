@@ -220,7 +220,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 					}
 				}
 
-				return nil
+				goto STATE_MACHINE
 			}
 
 			if req.TypeUrl == "" {
@@ -285,6 +285,8 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			// TODO: check delta.Dirty for work to do
 			// TODO: trigger delta update?
 		}
+
+	STATE_MACHINE:
 
 		// Trigger state machine
 		switch state {
