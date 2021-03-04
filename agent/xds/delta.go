@@ -40,6 +40,7 @@ func (s *Server) DeltaAggregatedResources(stream ADSDeltaStream) error {
 				return
 			}
 			if err != nil {
+				s.Logger.Error("Error receiving new DeltaDiscoveryRequest; closing request channel", "error", err)
 				close(reqCh)
 				return
 			}
@@ -69,7 +70,6 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 	// xDS requires a unique nonce to correlate response/request pairs
 	var nonce uint64
-	_ = nonce
 
 	// xDS works with versions of configs. Internally we don't have a consistent
 	// version. We could hash the config since versions don't have to be
@@ -81,28 +81,18 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 	// Loop state
 	var (
 		cfgSnap       *proxycfg.ConfigSnapshot
-		delta         *DeltaSnapshot
 		node          *envoy_config_core_v3.Node
 		proxyFeatures supportedProxyFeatures
 		stateCh       <-chan *proxycfg.ConfigSnapshot
 		watchCancel   func()
 		proxyID       structs.ServiceID
-
-		// type => name => version (as envoy has CONFIRMED)
-		resourceVersions map[string]map[string]string
-		// nonce => type => name => version (in-flight updates to envoy, pending ACK/NACK)
-		pendingUpdates map[string]map[string]map[string]string
-		// type => name => version (as consul knows right now)
-		currentVersions map[string]map[string]string
 	)
-	delta = newDeltaSnapshot()
-	resourceVersions = map[string]map[string]string{
-		ListenerType: make(map[string]string),
-		RouteType:    make(map[string]string),
-		ClusterType:  make(map[string]string),
-		EndpointType: make(map[string]string),
+
+	streamState := &deltaStreamState{
+		DeltaSnap:      newDeltaSnapshot(),
+		Types:          make(map[string]*deltaStreamTypeState),
+		PendingUpdates: make(map[string]map[string]map[string]string),
 	}
-	pendingUpdates = make(map[string]map[string]map[string]string)
 
 	// need to run a small state machine to get through initial authentication.
 	var state = stateDeltaInit
@@ -125,12 +115,21 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 	}
 
 	makeTypedResponse := func(typeUrl string) (*envoy_discovery_v3.DeltaDiscoveryResponse, map[string]string, error) {
+		ts, ok := streamState.Types[typeUrl]
+		if !ok {
+			return nil, nil, nil // not registered to type
+		}
+
 		// compute difference
+		logger.Trace("makeTypedResponse", "typeURL", typeUrl,
+			"isWild", ts.Wildcard,
+			"envoy", ts.ResourceVersions,
+			"consul", streamState.CurrentVersions(typeUrl))
 
 		updates := make(map[string]string)
 		// First find things that need updating or deleting
-		for name, envoyVers := range resourceVersions[typeUrl] {
-			currVers, ok := currentVersions[typeUrl][name]
+		for name, envoyVers := range ts.ResourceVersions {
+			currVers, ok := streamState.CurrentVersions(typeUrl)[name]
 			if !ok {
 				updates[name] = ""
 			} else if currVers != envoyVers {
@@ -139,9 +138,11 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 		}
 
 		// Now find new things
-		for name, currVers := range currentVersions[typeUrl] {
-			if _, ok := resourceVersions[typeUrl]; !ok {
-				updates[name] = currVers
+		if ts.Wildcard {
+			for name, currVers := range streamState.CurrentVersions(typeUrl) {
+				if _, ok := ts.ResourceVersions[name]; !ok {
+					updates[name] = currVers
+				}
 			}
 		}
 
@@ -158,7 +159,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			if vers == "" {
 				resp.RemovedResources = append(resp.RemovedResources, name)
 			} else {
-				res := delta.GetResource(typeUrl, name)
+				res := streamState.DeltaSnap.GetResource(typeUrl, name)
 				if res == nil {
 					return nil, nil, fmt.Errorf("unknown type url: %s", typeUrl)
 				}
@@ -181,9 +182,24 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 		return resp, updates, nil
 	}
 
+	unsentConfig := make(chan struct{}, 1)
+	notifyUnsent := func() {
+		select {
+		case unsentConfig <- struct{}{}:
+		default:
+		}
+	}
+	drainUnsent := func() {
+		select {
+		case <-unsentConfig:
+		default:
+		}
+	}
 	for {
+		logger.Trace("entering event trigger phase")
 		select {
 		case <-authTimer:
+			logger.Trace("event was auth timer elapsed")
 			// It's been too long since a Discovery{Request,Response} so recheck ACLs.
 			if err := checkStreamACLs(cfgSnap); err != nil {
 				return err
@@ -191,6 +207,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			extendAuthTimer()
 
 		case req, ok := <-reqCh:
+			logger.Trace("event was delta discovery request", "request", req)
 			if !ok {
 				// reqCh is closed when stream.Recv errors which is how we detect client
 				// going away. AFAICT the stream.Context() is only canceled once the
@@ -205,14 +222,17 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 					logger.Error("got ok response from envoy proxy", "nonce", req.ResponseNonce)
 
 					if req.ResponseNonce != "" {
-						pending, ok := pendingUpdates[req.ResponseNonce]
+						pending, ok := streamState.PendingUpdates[req.ResponseNonce]
 						if ok {
 							for typeUrl, versions := range pending {
-								for name, version := range versions {
-									resourceVersions[typeUrl][name] = version
+								ts, ok := streamState.Types[typeUrl]
+								if ok {
+									for name, version := range versions {
+										ts.ResourceVersions[name] = version
+									}
 								}
 							}
-							delete(pendingUpdates, req.ResponseNonce)
+							delete(streamState.PendingUpdates, req.ResponseNonce)
 						}
 					}
 				} else {
@@ -221,7 +241,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 						"error", status.ErrorProto(req.ErrorDetail))
 
 					if req.ResponseNonce != "" {
-						delete(pendingUpdates, req.ResponseNonce)
+						delete(streamState.PendingUpdates, req.ResponseNonce)
 					}
 				}
 
@@ -231,6 +251,8 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			if req.TypeUrl == "" {
 				return status.Errorf(codes.InvalidArgument, "type URL is required for ADS")
 			}
+
+			ts := streamState.AddRequestType(req)
 
 			if node == nil && req.Node != nil {
 				node = req.Node
@@ -243,24 +265,25 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 			if len(req.InitialResourceVersions) > 0 {
 				logger.Trace("setting initial resource versions for stream", "typeUrl", req.TypeUrl, "resources", req.InitialResourceVersions)
-				resourceVersions[req.TypeUrl] = req.InitialResourceVersions
+				ts.ResourceVersions = req.InitialResourceVersions
 			}
 
 			for _, name := range req.ResourceNamesUnsubscribe {
-				if _, ok := resourceVersions[req.TypeUrl][name]; ok {
+				if _, ok := ts.ResourceVersions[name]; ok {
 					logger.Trace("unsubscribing resource for stream", "typeUrl", req.TypeUrl, "resource", name)
-					delete(resourceVersions[req.TypeUrl], name)
+					delete(ts.ResourceVersions, name)
 				}
 			}
 
 			for _, name := range req.ResourceNamesSubscribe {
-				if _, ok := resourceVersions[req.TypeUrl][name]; !ok {
+				if _, ok := ts.ResourceVersions[name]; !ok {
 					logger.Trace("subscribing resource for stream", "typeUrl", req.TypeUrl, "resource", name)
-					resourceVersions[req.TypeUrl][name] = "" // envoy has no version yet
+					ts.ResourceVersions[name] = "" // envoy has no version yet
 				}
 			}
 
 		case cfgSnap = <-stateCh:
+			logger.Trace("event was new config snapshot")
 			// We got a new config, update the version counter
 			configVersion++
 
@@ -278,20 +301,20 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				}
 				newRes[typeURL] = res
 			}
-			delta.Accept(newRes)
-			delta.Commit() // TODO:refactor
 
-			v, err := delta.AsVersions()
-			if err != nil {
+			if err := streamState.DeltaSnap.Install(newRes); err != nil {
 				return err
 			}
-			currentVersions = v
 
-			// TODO: check delta.Dirty for work to do
-			// TODO: trigger delta update?
+			notifyUnsent()
+		case <-unsentConfig:
+			logger.Trace("event was unsent old config snapshot")
+			notifyUnsent()
 		}
 
 	STATE_MACHINE:
+
+		logger.Trace("entering state machine phase", "state", state)
 
 		// Trigger state machine
 		switch state {
@@ -341,7 +364,9 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			// timer is first started.
 			extendAuthTimer()
 
-			if len(pendingUpdates) > 0 {
+			drainUnsent()
+
+			if len(streamState.PendingUpdates) > 0 {
 				logger.Trace("Skipping delta computation because there are responses in flight",
 					"service_id", cfgSnap.ProxyID.String())
 				continue
@@ -350,59 +375,75 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			logger.Trace("Invoking all xDS resource handlers and sending changed data if there are any",
 				"service_id", cfgSnap.ProxyID.String())
 
-			{
-				lresp, lupdates, err := makeTypedResponse(ListenerType)
+			sendReply := func(typeUrl string) error {
+				resp, updates, err := makeTypedResponse(typeUrl)
 				if err != nil {
 					return err
 				}
-				if lresp != nil {
-					if err := stream.Send(lresp); err != nil {
-						return err
-					}
-					pendingUpdates[lresp.Nonce] = map[string]map[string]string{ListenerType: lupdates}
+				if resp == nil {
+					logger.Trace("no response generated", "typeURL", typeUrl)
+					return nil
 				}
+				logger.Trace("sending response", "typeURL", typeUrl, "nonce", resp.Nonce,
+					"response", resp)
+				if err := stream.Send(resp); err != nil {
+					return err
+				}
+				streamState.PendingUpdates[resp.Nonce] = map[string]map[string]string{typeUrl: updates}
+				logger.Trace("sent response", "typeURL", typeUrl, "nonce", resp.Nonce)
+				return nil
 			}
 
-			{
-				rresp, rupdates, err := makeTypedResponse(RouteType)
-				if err != nil {
+			for _, typeUrl := range []string{ListenerType, RouteType, ClusterType, EndpointType} {
+				if err := sendReply(typeUrl); err != nil {
 					return err
-				}
-				if rresp != nil {
-					if err := stream.Send(rresp); err != nil {
-						return err
-					}
-					pendingUpdates[rresp.Nonce] = map[string]map[string]string{RouteType: rupdates}
-				}
-			}
-
-			{
-				cresp, cupdates, err := makeTypedResponse(ClusterType)
-				if err != nil {
-					return err
-				}
-				if cresp != nil {
-					if err := stream.Send(cresp); err != nil {
-						return err
-					}
-					pendingUpdates[cresp.Nonce] = map[string]map[string]string{ClusterType: cupdates}
-				}
-			}
-
-			{
-				eresp, eupdates, err := makeTypedResponse(EndpointType)
-				if err != nil {
-					return err
-				}
-				if eresp != nil {
-					if err := stream.Send(eresp); err != nil {
-						return err
-					}
-					pendingUpdates[eresp.Nonce] = map[string]map[string]string{EndpointType: eupdates}
 				}
 			}
 		}
 	}
+}
+
+type deltaStreamState struct {
+	// DeltaSnap is the current snapshot from proxycfg converted into xDS
+	// structures.
+	DeltaSnap *DeltaSnapshot
+
+	// Types is the set of types that envoy has explicitly subscribed to.
+	Types map[string]*deltaStreamTypeState
+
+	// nonce => type => name => version (in-flight updates to envoy, pending ACK/NACK)
+	PendingUpdates map[string]map[string]map[string]string
+}
+
+func (s *deltaStreamState) CurrentVersions(typeUrl string) map[string]string {
+	if s.DeltaSnap.CurrentVersions == nil {
+		return nil
+	}
+	return s.DeltaSnap.CurrentVersions[typeUrl]
+}
+
+func (s *deltaStreamState) AddRequestType(req *envoy_discovery_v3.DeltaDiscoveryRequest) *deltaStreamTypeState {
+	if req.TypeUrl == "" {
+		return nil
+	}
+
+	if ts, ok := s.Types[req.TypeUrl]; ok {
+		return ts
+	}
+	// We are in the wildcard mode if the first request of a particular type has empty subscription list
+
+	ts := &deltaStreamTypeState{
+		Wildcard: len(req.ResourceNamesSubscribe) == 0,
+	}
+	s.Types[req.TypeUrl] = ts
+	return ts
+}
+
+type deltaStreamTypeState struct {
+	Wildcard bool
+
+	// name => version (as envoy has CONFIRMED)
+	ResourceVersions map[string]string
 }
 
 type DeltaSnapshot struct {
@@ -411,6 +452,11 @@ type DeltaSnapshot struct {
 
 	// Resources is the SoTW we are incrementally attempting to sync to envoy.
 	Resources *ResourceMap // what envoy thinks is true
+
+	// CurrentVersions is the the xDS versioning represented by Resources.
+	//
+	// type => name => version (as consul knows right now)
+	CurrentVersions map[string]map[string]string
 
 	// Dirty marks which attributes of Resources haven't been ACKd by envoy
 	// yet. A nil payload implies "delete this".
@@ -440,6 +486,23 @@ func (ds *DeltaSnapshot) GetResource(typeUrl, name string) proto.Message {
 	default:
 		return nil
 	}
+}
+
+func (ds *DeltaSnapshot) Install(resources map[string][]proto.Message) error {
+	// TODO:refactor make this atomic
+	if err := ds.Accept(resources); err != nil {
+		return err
+	}
+	ds.Commit()
+
+	v, err := ds.AsVersions()
+	if err != nil {
+		return err
+	}
+
+	ds.CurrentVersions = v
+
+	return nil
 }
 
 func (ds *DeltaSnapshot) Accept(resources map[string][]proto.Message) error {
