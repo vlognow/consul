@@ -96,7 +96,12 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 		currentVersions map[string]map[string]string
 	)
 	delta = newDeltaSnapshot()
-	resourceVersions = make(map[string]map[string]string)
+	resourceVersions = map[string]map[string]string{
+		ListenerType: make(map[string]string),
+		RouteType:    make(map[string]string),
+		ClusterType:  make(map[string]string),
+		EndpointType: make(map[string]string),
+	}
 	pendingUpdates = make(map[string]map[string]map[string]string)
 
 	// need to run a small state machine to get through initial authentication.
@@ -104,10 +109,10 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 	// Configure handlers for each type of request
 	handlers := map[string]func(connectionInfo, *proxycfg.ConfigSnapshot) ([]proto.Message, error){
-		EndpointType: s.endpointsFromSnapshot,
-		ClusterType:  s.clustersFromSnapshot,
-		RouteType:    s.routesFromSnapshot,
 		ListenerType: s.listenersFromSnapshot,
+		RouteType:    s.routesFromSnapshot,
+		ClusterType:  s.clustersFromSnapshot,
+		EndpointType: s.endpointsFromSnapshot,
 	}
 
 	var authTimer <-chan time.Time
