@@ -89,14 +89,6 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 	// need to run a small state machine to get through initial authentication.
 	var state = stateDeltaInit
 
-	// Configure handlers for each type of request
-	handlers := map[string]func(connectionInfo, *proxycfg.ConfigSnapshot) ([]proto.Message, error){
-		ListenerType: s.listenersFromSnapshot,
-		RouteType:    s.routesFromSnapshot,
-		ClusterType:  s.clustersFromSnapshot,
-		EndpointType: s.endpointsFromSnapshot,
-	}
-
 	var authTimer <-chan time.Time
 	extendAuthTimer := func() {
 		authTimer = time.After(s.AuthCheckFrequency)
@@ -192,15 +184,9 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				Token:         tokenFromContext(stream.Context()),
 				ProxyFeatures: proxyFeatures,
 			}
-
-			// Convert the whole thing to xDS protos.
-			newRes := make(map[string][]proto.Message)
-			for typeURL, handler := range handlers {
-				res, err := handler(cInfo, cfgSnap)
-				if err != nil {
-					return err
-				}
-				newRes[typeURL] = res
+			newRes, err := s.allResourcesFromSnapshot(cInfo, cfgSnap)
+			if err != nil {
+				return err
 			}
 
 			if err := streamState.DeltaSnap.Install(newRes); err != nil {
@@ -712,6 +698,33 @@ func computeDiff(m1, m2 map[string]proto.Message) map[string]proto.Message {
 	}
 
 	return res
+}
+
+func (s *Server) allResourcesFromSnapshot(cInfo connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) (map[string][]proto.Message, error) {
+	all := make(map[string][]proto.Message)
+	for _, typeUrl := range []string{ListenerType, RouteType, ClusterType, EndpointType} {
+		res, err := s.resourcesFromSnapshot(typeUrl, cInfo, cfgSnap)
+		if err != nil {
+			return nil, err
+		}
+		all[typeUrl] = res
+	}
+	return all, nil
+}
+
+func (s *Server) resourcesFromSnapshot(typeUrl string, cInfo connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) ([]proto.Message, error) {
+	switch typeUrl {
+	case ListenerType:
+		return s.listenersFromSnapshot(cInfo, cfgSnap)
+	case RouteType:
+		return s.routesFromSnapshot(cInfo, cfgSnap)
+	case ClusterType:
+		return s.clustersFromSnapshot(cInfo, cfgSnap)
+	case EndpointType:
+		return s.endpointsFromSnapshot(cInfo, cfgSnap)
+	default:
+		return nil, fmt.Errorf("unknown typeUrl: %s", typeUrl)
+	}
 }
 
 func hashResourceMap(resources map[string]proto.Message) (map[string]string, error) {
