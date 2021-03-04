@@ -24,6 +24,7 @@ import (
 	"github.com/hashicorp/consul/agent/proxycfg"
 	"github.com/hashicorp/consul/agent/structs"
 	"github.com/hashicorp/consul/logging"
+	"github.com/hashicorp/go-hclog"
 )
 
 // ADSDeltaStream is a shorter way of referring to this thing...
@@ -69,16 +70,6 @@ const (
 func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discovery_v3.DeltaDiscoveryRequest) error {
 	logger := s.Logger.Named(logging.XDS).With("xDS", "incremental")
 
-	// xDS requires a unique nonce to correlate response/request pairs
-	var nonce uint64
-
-	// xDS works with versions of configs. Internally we don't have a consistent
-	// version. We could hash the config since versions don't have to be
-	// ordered as far as I can tell, but it is cheaper to increment a counter
-	// every time we observe a new config since the upstream proxycfg package only
-	// delivers updates when there are actual changes.
-	var configVersion uint64
-
 	// Loop state
 	var (
 		cfgSnap       *proxycfg.ConfigSnapshot
@@ -113,74 +104,6 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 	checkStreamACLs := func(cfgSnap *proxycfg.ConfigSnapshot) error {
 		return s.checkStreamACLs(stream.Context(), cfgSnap)
-	}
-
-	makeTypedResponse := func(typeUrl string) (*envoy_discovery_v3.DeltaDiscoveryResponse, map[string]string, error) {
-		ts, ok := streamState.Types[typeUrl]
-		if !ok {
-			return nil, nil, nil // not registered to type
-		}
-
-		// compute difference
-		logger.Trace("makeTypedResponse", "typeURL", typeUrl,
-			"isWild", ts.Wildcard,
-			"envoy", ts.ResourceVersions,
-			"consul", streamState.CurrentVersions(typeUrl))
-
-		updates := make(map[string]string)
-		// First find things that need updating or deleting
-		for name, envoyVers := range ts.ResourceVersions {
-			currVers, ok := streamState.CurrentVersions(typeUrl)[name]
-			if !ok {
-				updates[name] = ""
-			} else if currVers != envoyVers {
-				updates[name] = currVers
-			}
-		}
-
-		// Now find new things
-		if ts.Wildcard {
-			for name, currVers := range streamState.CurrentVersions(typeUrl) {
-				if _, ok := ts.ResourceVersions[name]; !ok {
-					updates[name] = currVers
-				}
-			}
-		}
-
-		if len(updates) == 0 {
-			return nil, nil, nil
-		}
-
-		// now turn this into a disco response
-		resp := &envoy_discovery_v3.DeltaDiscoveryResponse{
-			// SystemVersionInfo    string      `protobuf:"bytes,1,opt,name=system_version_info,json=systemVersionInfo,proto3" json:"system_version_info,omitempty"`
-			TypeUrl: typeUrl,
-		}
-		for name, vers := range updates {
-			if vers == "" {
-				resp.RemovedResources = append(resp.RemovedResources, name)
-			} else {
-				res := streamState.DeltaSnap.GetResource(typeUrl, name)
-				if res == nil {
-					return nil, nil, fmt.Errorf("unknown type url: %s", typeUrl)
-				}
-				any, err := ptypes.MarshalAny(res)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				resp.Resources = append(resp.Resources, &envoy_discovery_v3.Resource{
-					Name:     name,
-					Resource: any,
-					Version:  vers,
-				})
-			}
-		}
-
-		nonce++
-		resp.Nonce = fmt.Sprintf("%08x", nonce)
-
-		return resp, updates, nil
 	}
 
 	unsentConfig := make(chan struct{}, 1)
@@ -219,31 +142,12 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 			if req.ErrorDetail != nil {
 				if req.ErrorDetail.Code == int32(codes.OK) {
-					// ACK
 					logger.Error("got ok response from envoy proxy", "nonce", req.ResponseNonce)
-
-					if req.ResponseNonce != "" {
-						pending, ok := streamState.PendingUpdates[req.ResponseNonce]
-						if ok {
-							for typeUrl, versions := range pending {
-								ts, ok := streamState.Types[typeUrl]
-								if ok {
-									for name, version := range versions {
-										ts.ResourceVersions[name] = version
-									}
-								}
-							}
-							delete(streamState.PendingUpdates, req.ResponseNonce)
-						}
-					}
+					streamState.Ack(req.ResponseNonce)
 				} else {
-					// NACK
 					logger.Error("got error response from envoy proxy", "nonce", req.ResponseNonce,
 						"error", status.ErrorProto(req.ErrorDetail))
-
-					if req.ResponseNonce != "" {
-						delete(streamState.PendingUpdates, req.ResponseNonce)
-					}
+					streamState.Nack(req.ResponseNonce)
 				}
 
 				goto STATE_MACHINE
@@ -253,7 +157,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				return status.Errorf(codes.InvalidArgument, "type URL is required for ADS")
 			}
 
-			ts := streamState.AddRequestType(req)
+			streamState.AddRequestType(req)
 
 			if node == nil && req.Node != nil {
 				node = req.Node
@@ -266,27 +170,23 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 			if len(req.InitialResourceVersions) > 0 {
 				logger.Trace("setting initial resource versions for stream", "typeUrl", req.TypeUrl, "resources", req.InitialResourceVersions)
-				ts.ResourceVersions = req.InitialResourceVersions
-			}
-
-			for _, name := range req.ResourceNamesUnsubscribe {
-				if _, ok := ts.ResourceVersions[name]; ok {
-					logger.Trace("unsubscribing resource for stream", "typeUrl", req.TypeUrl, "resource", name)
-					delete(ts.ResourceVersions, name)
-				}
+				streamState.SetVersions(req.TypeUrl, req.InitialResourceVersions)
 			}
 
 			for _, name := range req.ResourceNamesSubscribe {
-				if _, ok := ts.ResourceVersions[name]; !ok {
+				if streamState.Subscribe(req.TypeUrl, name) {
 					logger.Trace("subscribing resource for stream", "typeUrl", req.TypeUrl, "resource", name)
-					ts.ResourceVersions[name] = "" // envoy has no version yet
+				}
+			}
+
+			for _, name := range req.ResourceNamesUnsubscribe {
+				if streamState.Unsubscribe(req.TypeUrl, name) {
+					logger.Trace("unsubscribing resource for stream", "typeUrl", req.TypeUrl, "resource", name)
 				}
 			}
 
 		case cfgSnap = <-stateCh:
 			logger.Trace("event was new config snapshot")
-			// We got a new config, update the version counter
-			configVersion++
 
 			cInfo := connectionInfo{
 				Token:         tokenFromContext(stream.Context()),
@@ -377,7 +277,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				"service_id", cfgSnap.ProxyID.String())
 
 			sendReply := func(typeUrl string) error {
-				resp, updates, err := makeTypedResponse(typeUrl)
+				resp, updates, err := streamState.createDeltaResponse(logger, typeUrl)
 				if err != nil {
 					return err
 				}
@@ -414,6 +314,106 @@ type deltaStreamState struct {
 
 	// nonce => type => name => version (in-flight updates to envoy, pending ACK/NACK)
 	PendingUpdates map[string]map[string]map[string]string
+
+	nonce uint64 // xDS requires a unique nonce to correlate response/request pairs
+}
+
+func (s *deltaStreamState) Ack(nonce string) {
+	if nonce == "" {
+		return
+	}
+
+	pending, ok := s.PendingUpdates[nonce]
+	if !ok {
+		return
+	}
+
+	for typeUrl, versions := range pending {
+		ts, ok := s.Types[typeUrl]
+		if !ok {
+			continue
+		}
+		for name, version := range versions {
+			ts.ResourceVersions[name] = version
+		}
+	}
+	delete(s.PendingUpdates, nonce)
+}
+
+func (s *deltaStreamState) Nack(nonce string) {
+	if nonce == "" {
+		return
+	}
+
+	delete(s.PendingUpdates, nonce)
+}
+
+func (s *deltaStreamState) createDeltaResponse(logger hclog.Logger, typeUrl string) (*envoy_discovery_v3.DeltaDiscoveryResponse, map[string]string, error) {
+	ts, ok := s.Types[typeUrl]
+	if !ok {
+		return nil, nil, nil // not registered to type
+	}
+
+	// compute difference
+	logger.Trace("createDeltaResponse", "typeURL", typeUrl,
+		"isWild", ts.Wildcard,
+		"envoy", ts.ResourceVersions,
+		"consul", s.CurrentVersions(typeUrl))
+
+	updates := make(map[string]string)
+	// First find things that need updating or deleting
+	for name, envoyVers := range ts.ResourceVersions {
+		currVers, ok := s.CurrentVersions(typeUrl)[name]
+		if !ok {
+			updates[name] = ""
+		} else if currVers != envoyVers {
+			updates[name] = currVers
+		}
+	}
+
+	// Now find new things
+	if ts.Wildcard {
+		for name, currVers := range s.CurrentVersions(typeUrl) {
+			if _, ok := ts.ResourceVersions[name]; !ok {
+				updates[name] = currVers
+			}
+		}
+	}
+
+	if len(updates) == 0 {
+		return nil, nil, nil
+	}
+
+	// now turn this into a disco response
+	resp := &envoy_discovery_v3.DeltaDiscoveryResponse{
+		// SystemVersionInfo    string      `protobuf:"bytes,1,opt,name=system_version_info,json=systemVersionInfo,proto3" json:"system_version_info,omitempty"`
+		TypeUrl: typeUrl,
+	}
+	for name, vers := range updates {
+		if vers == "" {
+			resp.RemovedResources = append(resp.RemovedResources, name)
+		} else {
+			res := s.DeltaSnap.GetResource(typeUrl, name)
+			if res == nil {
+				return nil, nil, fmt.Errorf("unknown type url: %s", typeUrl)
+			}
+			any, err := ptypes.MarshalAny(res)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			resp.Resources = append(resp.Resources, &envoy_discovery_v3.Resource{
+				Name:     name,
+				Resource: any,
+				Version:  vers,
+			})
+		}
+	}
+
+	s.nonce++
+	resp.Nonce = fmt.Sprintf("%08x", s.nonce)
+
+	return resp, updates, nil
 }
 
 func (s *deltaStreamState) CurrentVersions(typeUrl string) map[string]string {
@@ -423,13 +423,13 @@ func (s *deltaStreamState) CurrentVersions(typeUrl string) map[string]string {
 	return s.DeltaSnap.CurrentVersions[typeUrl]
 }
 
-func (s *deltaStreamState) AddRequestType(req *envoy_discovery_v3.DeltaDiscoveryRequest) *deltaStreamTypeState {
+func (s *deltaStreamState) AddRequestType(req *envoy_discovery_v3.DeltaDiscoveryRequest) {
 	if req.TypeUrl == "" {
-		return nil
+		return
 	}
 
-	if ts, ok := s.Types[req.TypeUrl]; ok {
-		return ts
+	if _, ok := s.Types[req.TypeUrl]; ok {
+		return
 	}
 	// We are in the wildcard mode if the first request of a particular type has empty subscription list
 
@@ -437,7 +437,55 @@ func (s *deltaStreamState) AddRequestType(req *envoy_discovery_v3.DeltaDiscovery
 		Wildcard: len(req.ResourceNamesSubscribe) == 0,
 	}
 	s.Types[req.TypeUrl] = ts
-	return ts
+}
+
+func (s *deltaStreamState) SetVersions(typeUrl string, initial map[string]string) {
+	if typeUrl == "" {
+		return
+	}
+
+	ts, ok := s.Types[typeUrl]
+	if !ok {
+		return
+	}
+
+	ts.ResourceVersions = initial
+}
+
+func (s *deltaStreamState) Subscribe(typeUrl, name string) bool {
+	if typeUrl == "" {
+		return false
+	}
+
+	ts, ok := s.Types[typeUrl]
+	if !ok {
+		return false
+	}
+
+	if _, ok := ts.ResourceVersions[name]; ok {
+		return false
+	}
+
+	ts.ResourceVersions[name] = "" // start with no version
+	return true
+}
+
+func (s *deltaStreamState) Unsubscribe(typeUrl, name string) bool {
+	if typeUrl == "" {
+		return false
+	}
+
+	ts, ok := s.Types[typeUrl]
+	if !ok {
+		return false
+	}
+
+	if _, ok := ts.ResourceVersions[name]; !ok {
+		return false
+	}
+
+	delete(ts.ResourceVersions, name)
+	return true
 }
 
 type deltaStreamTypeState struct {
