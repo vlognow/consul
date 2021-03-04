@@ -183,7 +183,6 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 	// Loop state
 	var (
 		cfgSnap       *proxycfg.ConfigSnapshot
-		delta         *DeltaSnapshot
 		req           *envoy_discovery_v3.DiscoveryRequest
 		node          *envoy_config_core_v3.Node
 		proxyFeatures supportedProxyFeatures
@@ -192,7 +191,6 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 		watchCancel   func()
 		proxyID       structs.ServiceID
 	)
-	delta = newDeltaSnapshot()
 
 	// need to run a small state machine to get through initial authentication.
 	var state = stateInit
@@ -281,19 +279,6 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 			configVersion++
 
 			// TODO: for SoTW do bulk xDS here
-
-			// Convert the whole thing to xDS protos.
-			newRes := make(map[string][]proto.Message)
-			// for _, typeURL := range []string{ClusterType, EndpointType, RouteType, ListenerType} {
-			for typeURL, handler := range handlers {
-				res, err := handler.Generate(cfgSnap)
-				if err != nil {
-					return err
-				}
-				newRes[typeURL] = res
-			}
-			delta.Accept(newRes)
-			// TODO: trigger delta update?
 		}
 
 		// Trigger state machine

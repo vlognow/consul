@@ -251,6 +251,12 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			// timer is first started.
 			extendAuthTimer()
 
+			if !streamState.DeltaSnap.Ready {
+				logger.Trace("Skipping delta computation because we haven't gotten a snapshot yet",
+					"service_id", cfgSnap.ProxyID.String())
+				continue
+			}
+
 			drainUnsent()
 
 			if len(streamState.PendingUpdates) > 0 {
@@ -492,14 +498,6 @@ type DeltaSnapshot struct {
 	//
 	// type => name => version (as consul knows right now)
 	CurrentVersions map[string]map[string]string
-
-	// Dirty marks which attributes of Resources haven't been ACKd by envoy
-	// yet. A nil payload implies "delete this".
-	Dirty *ResourceMap
-
-	// NextResources is the SoTW we will sync next, if we are still syncing
-	// Resources and it's not completely ACKd yet.
-	NextResources *ResourceMap
 }
 
 func newDeltaSnapshot() *DeltaSnapshot {
@@ -524,55 +522,57 @@ func (ds *DeltaSnapshot) GetResource(typeUrl, name string) proto.Message {
 }
 
 func (ds *DeltaSnapshot) Install(resources map[string][]proto.Message) error {
-	// TODO:refactor make this atomic
-	if err := ds.Accept(resources); err != nil {
-		return err
-	}
-	ds.Commit()
-
-	v, err := ds.AsVersions()
-	if err != nil {
-		return err
-	}
-
-	ds.CurrentVersions = v
-
-	return nil
-}
-
-func (ds *DeltaSnapshot) Accept(resources map[string][]proto.Message) error {
 	newMap, err := newResourceMap(resources)
 	if err != nil {
 		return err
 	}
-
-	if ds.Dirty != nil {
-		// We are still syncing one snapshot, so just buffer this in the "lobby".
-		ds.NextResources = newMap
-		return nil
-		// TODO: get stuff out of the lobby
+	versions, err := newMap.HashVersions()
+	if err != nil {
+		return err
 	}
 
-	changes := newEmptyResourceMap()
-	changes.Listeners = computeDiff(newMap.Listeners, ds.Resources.Listeners)
-	changes.Routes = computeDiff(newMap.Routes, ds.Resources.Routes)
-	changes.Clusters = computeDiff(newMap.Clusters, ds.Resources.Clusters)
-	changes.Endpoints = computeDiff(newMap.Endpoints, ds.Resources.Endpoints)
+	if true {
+		// 1 == copy; 2 == truth
+		computeDiff := func(m1, m2 map[string]proto.Message) map[string]proto.Message {
+			res := make(map[string]proto.Message) // if value==nil ==> delete
 
-	if changes.IsEmpty() {
-		return nil
+			for k, v1 := range m1 {
+				v2, ok := m2[k]
+				if !ok {
+					res[k] = v1
+				} else {
+					if !proto.Equal(v1, v2) {
+						res[k] = v1
+					}
+				}
+			}
+
+			for k, _ := range m2 {
+				if _, ok := m1[k]; !ok {
+					res[k] = nil
+				}
+			}
+
+			return res
+		}
+		// TODO: delete this is for debugging
+		changes := newEmptyResourceMap()
+		changes.Listeners = computeDiff(newMap.Listeners, ds.Resources.Listeners)
+		changes.Routes = computeDiff(newMap.Routes, ds.Resources.Routes)
+		changes.Clusters = computeDiff(newMap.Clusters, ds.Resources.Clusters)
+		changes.Endpoints = computeDiff(newMap.Endpoints, ds.Resources.Endpoints)
+
+		if changes.IsEmpty() {
+			return nil
+		}
+		fmt.Fprintf(os.Stdout, "RBOYER CHANGES: %s\n", jd(changes))
 	}
-	fmt.Fprintf(os.Stdout, "RBOYER CHANGES: %s\n", jd(changes))
 
-	ds.Dirty = changes
 	ds.Resources = newMap
+	ds.CurrentVersions = versions
 	ds.Ready = true
 
 	return nil
-}
-
-func (ds *DeltaSnapshot) Commit() {
-	ds.Dirty = nil
 }
 
 func (ds *DeltaSnapshot) AsVersions() (map[string]map[string]string, error) {
@@ -628,6 +628,40 @@ func (m *ResourceMap) IsEmpty() bool {
 	return len(m.Listeners) == 0 && len(m.Routes) == 0 && len(m.Clusters) == 0 && len(m.Endpoints) == 0
 }
 
+func (m *ResourceMap) HashVersions() (map[string]map[string]string, error) {
+	out := make(map[string]map[string]string)
+	{
+		lm, err := hashResourceMap(m.Listeners)
+		if err != nil {
+			return nil, err
+		}
+		out[ListenerType] = lm
+	}
+	{
+		rm, err := hashResourceMap(m.Routes)
+		if err != nil {
+			return nil, err
+		}
+		out[RouteType] = rm
+	}
+	{
+		cm, err := hashResourceMap(m.Clusters)
+		if err != nil {
+			return nil, err
+		}
+		out[ClusterType] = cm
+	}
+	{
+		em, err := hashResourceMap(m.Endpoints)
+		if err != nil {
+			return nil, err
+		}
+		out[EndpointType] = em
+	}
+
+	return out, nil
+}
+
 func newEmptyResourceMap() *ResourceMap {
 	return &ResourceMap{
 		Listeners: make(map[string]proto.Message),
@@ -674,30 +708,6 @@ func newResourceMap(resources map[string][]proto.Message) (*ResourceMap, error) 
 	}
 
 	return m, nil
-}
-
-// 1 == copy; 2 == truth
-func computeDiff(m1, m2 map[string]proto.Message) map[string]proto.Message {
-	res := make(map[string]proto.Message) // if value==nil ==> delete
-
-	for k, v1 := range m1 {
-		v2, ok := m2[k]
-		if !ok {
-			res[k] = v1
-		} else {
-			if !proto.Equal(v1, v2) {
-				res[k] = v1
-			}
-		}
-	}
-
-	for k, _ := range m2 {
-		if _, ok := m1[k]; !ok {
-			res[k] = nil
-		}
-	}
-
-	return res
 }
 
 func (s *Server) allResourcesFromSnapshot(cInfo connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) (map[string][]proto.Message, error) {
