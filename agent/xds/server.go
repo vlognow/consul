@@ -136,10 +136,10 @@ type Server struct {
 //
 // Deprecated: use DeltaAggregatedResources instead
 func (s *Server) StreamAggregatedResources(stream ADSStream) error {
-	return errors.New("Please use the incremental xDS api endpoint")
+	return errors.New("not implemented")
 }
 
-// Deprecated: this is only present as part of the v2<->v3 bidirectional shim.
+// Deprecated: remove when xDS v2 is no longer supported
 func (s *Server) streamAggregatedResources(stream ADSStream) error {
 	// a channel for receiving incoming requests
 	reqCh := make(chan *envoy_discovery_v3.DiscoveryRequest)
@@ -175,6 +175,7 @@ const (
 	stateRunning
 )
 
+// Deprecated: remove when xDS v2 is no longer supported
 func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.DiscoveryRequest) error {
 	logger := s.Logger.Named(logging.XDS).With("xDS", "SoTW")
 
@@ -360,6 +361,7 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 	}
 }
 
+// Deprecated: remove when xDS v2 is no longer supported
 type xDSType struct {
 	typeURL       string
 	stream        ADSStream
