@@ -408,11 +408,11 @@ func (s *deltaStreamState) createDeltaResponse(logger hclog.Logger, typeUrl stri
 		return nil, nil, nil // not registered to type
 	}
 
-	// compute difference
-	logger.Trace("createDeltaResponse", "typeURL", typeUrl,
-		"isWild", ts.Wildcard,
-		"envoy", ts.ResourceVersions,
-		"consul", s.CurrentVersions(typeUrl))
+	// // compute difference
+	// logger.Trace("createDeltaResponse", "typeURL", typeUrl,
+	// 	"isWild", ts.Wildcard,
+	// 	"envoy", ts.ResourceVersions,
+	// 	"consul", s.CurrentVersions(typeUrl))
 
 	updates := make(map[string]string)
 	// First find things that need updating or deleting
