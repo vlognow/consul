@@ -133,7 +133,8 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				}
 			}
 
-			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl, "req", logReq)
+			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl,
+				"req", jd(logReq))
 			if !ok {
 				// reqCh is closed when stream.Recv errors which is how we detect client
 				// going away. AFAICT the stream.Context() is only canceled once the
@@ -307,8 +308,16 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 					logger.Trace("no response generated", "typeURL", typeUrl)
 					return nil
 				}
+				var logResp *envoy_discovery_v3.DeltaDiscoveryResponse
+				{
+					dup, err := copystructure.Copy(resp)
+					if err == nil {
+						logResp = dup.(*envoy_discovery_v3.DeltaDiscoveryResponse)
+					}
+				}
+
 				logger.Trace("sending response", "typeURL", typeUrl, "nonce", resp.Nonce,
-					"response", resp)
+					"response", jd(logResp))
 				if err := stream.Send(resp); err != nil {
 					return err
 				}

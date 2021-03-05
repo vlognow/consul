@@ -33,6 +33,8 @@ func (s *Server) routesFromSnapshot(cInfo connectionInfo, cfgSnap *proxycfg.Conf
 		return routesForIngressGateway(cInfo, cfgSnap.IngressGateway.Upstreams, cfgSnap.IngressGateway.DiscoveryChain)
 	case structs.ServiceKindTerminatingGateway:
 		return s.routesFromSnapshotTerminatingGateway(cInfo, cfgSnap)
+	case structs.ServiceKindMeshGateway:
+		return nil, nil // mesh gateways will never have routes
 	default:
 		return nil, fmt.Errorf("Invalid service kind: %v", cfgSnap.Kind)
 	}
