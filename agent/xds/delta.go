@@ -624,7 +624,7 @@ func (ds *DeltaSnapshot) Install(resources map[string][]proto.Message) error {
 				}
 			}
 
-			for k, _ := range m2 {
+			for k := range m2 {
 				if _, ok := m1[k]; !ok {
 					res[k] = nil
 				}
