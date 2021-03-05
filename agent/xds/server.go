@@ -2,6 +2,7 @@ package xds
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -133,6 +134,10 @@ type Server struct {
 // envoy_discovery_v3.AggregatedDiscoveryServiceServer. This is the ADS endpoint which is
 // the only xDS API we directly support for now.
 func (s *Server) StreamAggregatedResources(stream ADSStream) error {
+	return errors.New("Please use the incremental xDS api endpoint")
+}
+
+func (s *Server) streamAggregatedResources(stream ADSStream) error {
 	// a channel for receiving incoming requests
 	reqCh := make(chan *envoy_discovery_v3.DiscoveryRequest)
 	reqStop := int32(0)
