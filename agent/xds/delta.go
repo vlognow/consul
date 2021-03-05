@@ -158,6 +158,22 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				logger.Error("got ok response from envoy proxy", "nonce", req.ResponseNonce)
 				streamState.Ack(req.ResponseNonce)
 
+				/*
+					TODO: actually skip the goto
+
+					DeltaDiscoveryRequest plays two independent roles. Any
+					DeltaDiscoveryRequest can be either or both of: [1] informing
+					the server of what resources the client has gained/lost
+					interest in (using resource_names_subscribe and
+					resource_names_unsubscribe), or [2] (N)ACKing an earlier
+					resource update from the server (using response_nonce, with
+					presence of error_detail making it a NACK). Additionally, the
+					first message (for a given type_url) of a reconnected gRPC
+					stream has a third role: informing the server of the resources
+					(and their versions) that the client already possesses, using
+					the initial_resource_versions field.
+				*/
+
 				goto STATE_MACHINE
 			}
 
