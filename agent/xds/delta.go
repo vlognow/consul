@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/consul/agent/proxycfg"
 	"github.com/hashicorp/consul/agent/structs"
 	"github.com/hashicorp/consul/logging"
-	"github.com/hashicorp/go-hclog"
 )
 
 // ADSDeltaStream is a shorter way of referring to this thing...
@@ -300,7 +299,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				"service_id", cfgSnap.ProxyID.String())
 
 			sendReply := func(typeUrl string) error {
-				resp, updates, err := streamState.createDeltaResponse(logger, typeUrl)
+				resp, updates, err := streamState.createDeltaResponse(typeUrl)
 				if err != nil {
 					return err
 				}
@@ -411,18 +410,13 @@ func (s *deltaStreamState) Nack(nonce string) {
 	delete(s.PendingUpdates, nonce)
 }
 
-func (s *deltaStreamState) createDeltaResponse(logger hclog.Logger, typeUrl string) (*envoy_discovery_v3.DeltaDiscoveryResponse, map[string]string, error) {
+func (s *deltaStreamState) createDeltaResponse(typeUrl string) (*envoy_discovery_v3.DeltaDiscoveryResponse, map[string]string, error) {
 	ts, ok := s.Types[typeUrl]
 	if !ok {
 		return nil, nil, nil // not registered to type
 	}
 
-	// // compute difference
-	// logger.Trace("createDeltaResponse", "typeURL", typeUrl,
-	// 	"isWild", ts.Wildcard,
-	// 	"envoy", ts.ResourceVersions,
-	// 	"consul", s.CurrentVersions(typeUrl))
-
+	// compute difference
 	updates := make(map[string]string)
 	// First find things that need updating or deleting
 	for name, envoyVers := range ts.ResourceVersions {

@@ -133,10 +133,13 @@ type Server struct {
 // StreamAggregatedResources implements
 // envoy_discovery_v3.AggregatedDiscoveryServiceServer. This is the ADS endpoint which is
 // the only xDS API we directly support for now.
+//
+// Deprecated: use DeltaAggregatedResources instead
 func (s *Server) StreamAggregatedResources(stream ADSStream) error {
 	return errors.New("Please use the incremental xDS api endpoint")
 }
 
+// Deprecated: this is only present as part of the v2<->v3 bidirectional shim.
 func (s *Server) streamAggregatedResources(stream ADSStream) error {
 	// a channel for receiving incoming requests
 	reqCh := make(chan *envoy_discovery_v3.DiscoveryRequest)
