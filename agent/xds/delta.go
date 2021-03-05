@@ -15,6 +15,7 @@ import (
 	envoy_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	"github.com/mitchellh/copystructure"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
@@ -123,7 +124,16 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			extendAuthTimer()
 
 		case req, ok := <-reqCh:
-			logger.Trace("event was delta discovery request", "request", req)
+			var logReq *envoy_discovery_v3.DeltaDiscoveryRequest
+			{
+				dup, err := copystructure.Copy(req)
+				if err == nil {
+					logReq = dup.(*envoy_discovery_v3.DeltaDiscoveryRequest)
+					logReq.Node = nil
+				}
+			}
+
+			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl, "req", logReq)
 			if !ok {
 				// reqCh is closed when stream.Recv errors which is how we detect client
 				// going away. AFAICT the stream.Context() is only canceled once the
@@ -132,24 +142,28 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				return nil
 			}
 
-			if req.ErrorDetail != nil {
-				if req.ErrorDetail.Code == int32(codes.OK) {
-					logger.Error("got ok response from envoy proxy", "nonce", req.ResponseNonce)
-					streamState.Ack(req.ResponseNonce)
-				} else {
-					logger.Error("got error response from envoy proxy", "nonce", req.ResponseNonce,
-						"error", status.ErrorProto(req.ErrorDetail))
-					streamState.Nack(req.ResponseNonce)
-				}
-
-				goto STATE_MACHINE
-			}
-
 			if req.TypeUrl == "" {
 				return status.Errorf(codes.InvalidArgument, "type URL is required for ADS")
 			}
 
-			streamState.AddRequestType(req)
+			if req.ErrorDetail != nil {
+				logger.Error("got error response from envoy proxy", "nonce", req.ResponseNonce,
+					"error", status.ErrorProto(req.ErrorDetail))
+				streamState.Nack(req.ResponseNonce)
+
+				goto STATE_MACHINE
+			}
+
+			if req.ResponseNonce != "" {
+				logger.Error("got ok response from envoy proxy", "nonce", req.ResponseNonce)
+				streamState.Ack(req.ResponseNonce)
+
+				goto STATE_MACHINE
+			}
+
+			if streamState.AddRequestType(req) {
+				logger.Trace("subscribing to type", "typeUrl", req.TypeUrl)
+			}
 
 			if node == nil && req.Node != nil {
 				node = req.Node
@@ -287,7 +301,38 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				return nil
 			}
 
-			for _, typeUrl := range []string{ListenerType, RouteType, ClusterType, EndpointType} {
+			// TODO:
+			/*
+				Knowing When a Requested Resource Does Not Exist
+
+				When a resource subscribed to by a client does not exist, the
+				server will send a Resource whose name field matches the name
+				that the client subscribed to and whose resource field is
+				unset. This allows the client to quickly determine when a
+				resource does not exist without waiting for a timeout, as would
+				be done in the SotW protocol variants. However, clients are
+				still encouraged to use a timeout to protect against the case
+				where the management server fails to send a response in a
+				timely manner.
+			*/
+
+			/*
+				CDS updates (if any) must always be pushed first.
+
+				EDS updates (if any) must arrive after CDS updates for the respective clusters.
+
+				LDS updates must arrive after corresponding CDS/EDS updates.
+
+				RDS updates related to the newly added listeners must arrive after CDS/EDS/LDS updates.
+
+				// TODO: THEN DO CDS DELETES
+			*/
+			for _, typeUrl := range []string{
+				ClusterType,
+				EndpointType,
+				ListenerType,
+				RouteType,
+			} {
 				if err := sendReply(typeUrl); err != nil {
 					return err
 				}
@@ -328,6 +373,7 @@ func (s *deltaStreamState) Ack(nonce string) {
 		for name, version := range versions {
 			ts.ResourceVersions[name] = version
 		}
+		ts.SentToEnvoyOnce = true
 	}
 	delete(s.PendingUpdates, nonce)
 }
@@ -372,7 +418,7 @@ func (s *deltaStreamState) createDeltaResponse(logger hclog.Logger, typeUrl stri
 		}
 	}
 
-	if len(updates) == 0 {
+	if len(updates) == 0 && ts.SentToEnvoyOnce {
 		return nil, nil, nil
 	}
 
@@ -415,20 +461,22 @@ func (s *deltaStreamState) CurrentVersions(typeUrl string) map[string]string {
 	return s.DeltaSnap.CurrentVersions[typeUrl]
 }
 
-func (s *deltaStreamState) AddRequestType(req *envoy_discovery_v3.DeltaDiscoveryRequest) {
+func (s *deltaStreamState) AddRequestType(req *envoy_discovery_v3.DeltaDiscoveryRequest) bool {
 	if req.TypeUrl == "" {
-		return
+		return false
 	}
 
 	if _, ok := s.Types[req.TypeUrl]; ok {
-		return
+		return false
 	}
 	// We are in the wildcard mode if the first request of a particular type has empty subscription list
 
 	ts := &deltaStreamTypeState{
-		Wildcard: len(req.ResourceNamesSubscribe) == 0,
+		Wildcard:         len(req.ResourceNamesSubscribe) == 0,
+		ResourceVersions: make(map[string]string),
 	}
 	s.Types[req.TypeUrl] = ts
+	return true
 }
 
 func (s *deltaStreamState) SetVersions(typeUrl string, initial map[string]string) {
@@ -454,6 +502,10 @@ func (s *deltaStreamState) Subscribe(typeUrl, name string) bool {
 		return false
 	}
 
+	if ts.Wildcard {
+		return false // not relevant
+	}
+
 	if _, ok := ts.ResourceVersions[name]; ok {
 		return false
 	}
@@ -472,6 +524,10 @@ func (s *deltaStreamState) Unsubscribe(typeUrl, name string) bool {
 		return false
 	}
 
+	if ts.Wildcard {
+		return false // not relevant
+	}
+
 	if _, ok := ts.ResourceVersions[name]; !ok {
 		return false
 	}
@@ -482,6 +538,8 @@ func (s *deltaStreamState) Unsubscribe(typeUrl, name string) bool {
 
 type deltaStreamTypeState struct {
 	Wildcard bool
+
+	SentToEnvoyOnce bool
 
 	// name => version (as envoy has CONFIRMED)
 	ResourceVersions map[string]string
