@@ -3,7 +3,6 @@ package xds
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -15,17 +14,16 @@ import (
 	envoy_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
-	"github.com/mitchellh/copystructure"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
+	"github.com/hashicorp/go-hclog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/hashicorp/consul/agent/proxycfg"
 	"github.com/hashicorp/consul/agent/structs"
 	"github.com/hashicorp/consul/logging"
-	"github.com/hashicorp/go-hclog"
 )
 
 // ADSDeltaStream is a shorter way of referring to this thing...
@@ -113,6 +111,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 	var retryTimer <-chan time.Time
 	extendRetryTimer := func() {
+		logger.Trace("retrying response", "after", deltaRetryFrequency)
 		retryTimer = time.After(deltaRetryFrequency)
 	}
 
@@ -142,17 +141,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			extendAuthTimer()
 
 		case req, ok := <-reqCh:
-			var logReq *envoy_discovery_v3.DeltaDiscoveryRequest
-			{
-				dup, err := copystructure.Copy(req)
-				if err == nil {
-					logReq = dup.(*envoy_discovery_v3.DeltaDiscoveryRequest)
-					logReq.Node = nil
-				}
-			}
-
-			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl,
-				"req", jd(logReq))
+			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl)
 			if !ok {
 				// reqCh is closed when stream.Recv errors which is how we detect client
 				// going away. AFAICT the stream.Context() is only canceled once the
@@ -272,12 +261,12 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			}
 
 			var pendingTypes []string
-			for name, handler := range handlers {
+			for typeUrl, handler := range handlers {
 				if !handler.registered {
 					continue
 				}
 				if len(handler.pendingUpdates) > 0 {
-					pendingTypes = append(pendingTypes, name)
+					pendingTypes = append(pendingTypes, typeUrl)
 				}
 			}
 			if len(pendingTypes) > 0 {
@@ -473,15 +462,7 @@ func (t *xDSDeltaType) SendIfNew(
 	*nonce++
 	resp.Nonce = fmt.Sprintf("%08x", *nonce)
 
-	var logResp *envoy_discovery_v3.DeltaDiscoveryResponse
-	{
-		dup, err := copystructure.Copy(resp)
-		if err == nil {
-			logResp = dup.(*envoy_discovery_v3.DeltaDiscoveryResponse)
-		}
-	}
-
-	t.logger.Trace("sending response", "nonce", resp.Nonce, "response", jd(logResp))
+	t.logger.Trace("sending response", "nonce", resp.Nonce)
 	if err := t.stream.Send(resp); err != nil {
 		return err
 	}
@@ -552,12 +533,6 @@ func (t *xDSDeltaType) createDeltaResponse(
 	}
 
 	return resp, updates, nil
-}
-
-// TODO: Remove
-func jd(v interface{}) string {
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return string(b)
 }
 
 func computeResourceVersions(resourceMap IndexedResources) (map[string]map[string]string, error) {
