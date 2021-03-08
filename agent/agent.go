@@ -652,12 +652,11 @@ func (a *Agent) listenAndServeGRPC() error {
 	}
 
 	xdsServer := &xds.Server{
-		Logger:             a.logger.Named(logging.Envoy),
-		CfgMgr:             a.proxyConfig,
-		ResolveToken:       a.resolveToken,
-		CheckFetcher:       a,
-		CfgFetcher:         a,
-		AuthCheckFrequency: xds.DefaultAuthCheckFrequency,
+		Logger:       a.logger.Named(logging.Envoy),
+		CfgMgr:       a.proxyConfig,
+		ResolveToken: a.resolveToken,
+		CheckFetcher: a,
+		CfgFetcher:   a,
 	}
 
 	tlsConfig := a.tlsConfigurator

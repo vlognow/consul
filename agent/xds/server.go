@@ -82,6 +82,10 @@ const (
 	// DefaultAuthCheckFrequency is the default value for
 	// Server.AuthCheckFrequency to use when the zero value is provided.
 	DefaultAuthCheckFrequency = 5 * time.Minute
+
+	// DefaultDeltaRetryFrequency is the default value for
+	// Server.DeltaRetryFrequency to use when the zero value is provided.
+	DefaultDeltaRetryFrequency = 30 * time.Second
 )
 
 // ACLResolverFunc is a shim to resolve ACLs. Since ACL enforcement is so far
@@ -126,6 +130,10 @@ type Server struct {
 	AuthCheckFrequency time.Duration
 	CheckFetcher       HTTPCheckFetcher
 	CfgFetcher         ConfigFetcher
+
+	// DeltaRetryFrequency is how long to wait before trying to send an update
+	// after a failure to originally do so at the scheduled time. TODO: backoff?
+	DeltaRetryFrequency time.Duration
 
 	DisableV2Protocol bool
 }
@@ -241,9 +249,14 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 		},
 	}
 
+	var authCheckFrequency = s.AuthCheckFrequency
+	if authCheckFrequency == 0 {
+		authCheckFrequency = DefaultAuthCheckFrequency
+	}
+
 	var authTimer <-chan time.Time
 	extendAuthTimer := func() {
-		authTimer = time.After(s.AuthCheckFrequency)
+		authTimer = time.After(authCheckFrequency)
 	}
 
 	checkStreamACLs := func(cfgSnap *proxycfg.ConfigSnapshot) error {
