@@ -113,6 +113,10 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 		}),
 		EndpointType: newDeltaType(logger, stream, EndpointType, nil),
 	}
+	for _, h := range handlers {
+		h.logDebugRequest = s.logDebugRequest
+		h.logDebugResponse = s.logDebugResponse
+	}
 
 	var deltaRetryFrequency = s.DeltaRetryFrequency
 	if deltaRetryFrequency == 0 {
@@ -151,7 +155,6 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			extendAuthTimer()
 
 		case req, ok := <-reqCh:
-			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl)
 			if !ok {
 				// reqCh is closed when stream.Recv errors which is how we detect client
 				// going away. AFAICT the stream.Context() is only canceled once the
@@ -159,6 +162,9 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				// there's no point in blocking on that.
 				return nil
 			}
+			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl)
+
+			s.logDebugRequest("Incremental xDS v3", req)
 
 			if req.TypeUrl == "" {
 				return status.Errorf(codes.InvalidArgument, "type URL is required for ADS")
@@ -345,6 +351,9 @@ type xDSDeltaType struct {
 
 	// nonce -> name -> version
 	pendingUpdates map[string]map[string]string
+
+	logDebugRequest  func(msg string, pb proto.Message)
+	logDebugResponse func(msg string, pb proto.Message)
 }
 
 func newDeltaType(
@@ -406,7 +415,7 @@ func (t *xDSDeltaType) Recv(req *envoy_discovery_v3.DeltaDiscoveryRequest) bool 
 			response_nonce, with presence of error_detail making it a NACK).
 		*/
 		if req.ErrorDetail == nil {
-			t.logger.Error("got ok response from envoy proxy", "nonce", req.ResponseNonce)
+			t.logger.Trace("got ok response from envoy proxy", "nonce", req.ResponseNonce)
 			t.ack(req.ResponseNonce)
 		} else {
 			t.logger.Error("got error response from envoy proxy", "nonce", req.ResponseNonce,
@@ -507,6 +516,8 @@ func (t *xDSDeltaType) SendIfNew(
 
 	*nonce++
 	resp.Nonce = fmt.Sprintf("%08x", *nonce)
+
+	t.logDebugResponse("Incremental xDS v3", resp)
 
 	t.logger.Trace("sending response", "nonce", resp.Nonce)
 	if err := t.stream.Send(resp); err != nil {

@@ -11,8 +11,10 @@ import (
 	envoy_discovery_v2 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/hashicorp/go-hclog"
+	"github.com/mitchellh/copystructure"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -249,6 +251,11 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 		},
 	}
 
+	for _, h := range handlers {
+		h.logDebugRequest = s.logDebugRequest
+		h.logDebugResponse = s.logDebugResponse
+	}
+
 	var authCheckFrequency = s.AuthCheckFrequency
 	if authCheckFrequency == 0 {
 		authCheckFrequency = DefaultAuthCheckFrequency
@@ -280,6 +287,9 @@ func (s *Server) process(stream ADSStream, reqCh <-chan *envoy_discovery_v3.Disc
 				// there's no point in blocking on that.
 				return nil
 			}
+
+			s.logDebugRequest("SOTW xDS v2", req)
+
 			if req.TypeUrl == "" {
 				return status.Errorf(codes.InvalidArgument, "type URL is required for ADS")
 			}
@@ -392,6 +402,9 @@ type xDSType struct {
 	lastVersion  uint64
 	resources    func(cInfo connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) ([]proto.Message, error)
 	allowEmptyFn func(cfgSnap *proxycfg.ConfigSnapshot) bool
+
+	logDebugRequest  func(msg string, pb proto.Message)
+	logDebugResponse func(msg string, pb proto.Message)
 }
 
 // connectionInfo represents details specific to this connection
@@ -450,6 +463,8 @@ func (t *xDSType) SendIfNew(cfgSnap *proxycfg.ConfigSnapshot, version uint64, no
 	if err != nil {
 		return err
 	}
+
+	t.logDebugResponse("SOTW xDS v2", resp)
 
 	err = t.stream.Send(resp)
 	if err != nil {
@@ -526,4 +541,47 @@ func (s *Server) checkStreamACLs(streamCtx context.Context, cfgSnap *proxycfg.Co
 
 	// Authed OK!
 	return nil
+}
+
+func (s *Server) logDebugRequest(msg string, pb proto.Message)  { s.logDebugProto(msg, pb, false) }
+func (s *Server) logDebugResponse(msg string, pb proto.Message) { s.logDebugProto(msg, pb, true) }
+
+// TODO: REMOVE
+func (s *Server) logDebugProto(msg string, pb proto.Message, response bool) {
+	dir := "request"
+	if response {
+		dir = "response"
+	}
+
+	{
+		dup, err := copystructure.Copy(pb)
+		if err != nil {
+			panic(err)
+		}
+		pb = dup.(proto.Message)
+	}
+
+	// strip the node field
+	switch x := pb.(type) {
+	case *envoy_discovery_v3.DiscoveryRequest:
+		x.Node = nil
+	case *envoy_discovery_v3.DeltaDiscoveryRequest:
+		x.Node = nil
+	}
+
+	v := rbProtoToJSON(pb)
+
+	s.Logger.Debug(msg, "direction", dir, "protobuf", v)
+}
+
+// TODO: REMOVE
+func rbProtoToJSON(pb proto.Message) string {
+	m := jsonpb.Marshaler{
+		Indent: "  ",
+	}
+	gotJSON, err := m.MarshalToString(pb)
+	if err != nil {
+		return "<ERROR: " + err.Error() + ">"
+	}
+	return gotJSON
 }

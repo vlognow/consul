@@ -32,6 +32,8 @@ import (
 	envoy_tls_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	envoy_discovery_v2 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	envoy_type_v2 "github.com/envoyproxy/go-control-plane/envoy/type"
+	envoy_type_v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
@@ -179,6 +181,20 @@ func convertHttpFilterToV2(filter *envoy_http_v3.HttpFilter) (*envoy_http_v2.Htt
 	}
 
 	return &filterV2, nil
+}
+
+func convertSemanticVersionToV2(version *envoy_type_v3.SemanticVersion) (*envoy_type_v2.SemanticVersion, error) {
+	var pbuf proto.Buffer
+	if err := pbuf.Marshal(version); err != nil {
+		return nil, err
+	}
+
+	var versionV2 envoy_type_v2.SemanticVersion
+	if err := pbuf.Unmarshal(&versionV2); err != nil {
+		return nil, err
+	}
+
+	return &versionV2, nil
 }
 
 // Responses
