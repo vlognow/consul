@@ -609,33 +609,8 @@ func indexResources(resources map[string][]proto.Message) (IndexedResources, err
 
 	for typeURL, typeRes := range resources {
 		for _, res := range typeRes {
-			var name string
-			switch typeURL {
-			case ListenerType:
-				l, ok := res.(*envoy_listener_v3.Listener)
-				if !ok {
-					return nil, fmt.Errorf("unexpected value type for xDS type %s found in delta snapshot: %T", typeURL, res)
-				}
-				name = l.Name
-			case RouteType:
-				route, ok := res.(*envoy_route_v3.RouteConfiguration)
-				if !ok {
-					return nil, fmt.Errorf("unexpected value type for xDS type %s found in delta snapshot: %T", typeURL, res)
-				}
-				name = route.Name
-			case ClusterType:
-				c, ok := res.(*envoy_cluster_v3.Cluster)
-				if !ok {
-					return nil, fmt.Errorf("unexpected value type for xDS type %s found in delta snapshot: %T", typeURL, res)
-				}
-				name = c.Name
-			case EndpointType:
-				e, ok := res.(*envoy_endpoint_v3.ClusterLoadAssignment)
-				if !ok {
-					return nil, fmt.Errorf("unexpected value type for xDS type %s found in delta snapshot: %T", typeURL, res)
-				}
-				name = e.ClusterName
-			default:
+			name := getResourceName(res)
+			if name == "" {
 				return nil, fmt.Errorf("unexpected xDS type found in delta snapshot: %s", typeURL)
 			}
 			data[typeURL][name] = res
@@ -643,6 +618,22 @@ func indexResources(resources map[string][]proto.Message) (IndexedResources, err
 	}
 
 	return data, nil
+}
+
+func getResourceName(res proto.Message) string {
+	// NOTE: this only covers types that we currently care about for LDS/RDS/CDS/EDS
+	switch x := res.(type) {
+	case *envoy_listener_v3.Listener: // LDS
+		return x.Name
+	case *envoy_route_v3.RouteConfiguration: // RDS
+		return x.Name
+	case *envoy_cluster_v3.Cluster: // CDS
+		return x.Name
+	case *envoy_endpoint_v3.ClusterLoadAssignment: // EDS
+		return x.ClusterName
+	default:
+		return ""
+	}
 }
 
 func (s *Server) allResourcesFromSnapshot(cInfo connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) (map[string][]proto.Message, error) {
