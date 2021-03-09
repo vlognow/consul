@@ -89,6 +89,8 @@ func (m *testManager) AssertWatchCancelled(t *testing.T, proxyID structs.Service
 	}
 }
 
+// NOTE: this test sidesteps the v3-only-does-incremental so it can test
+// v2-state-of-the-world-xDS indirectly via the v3 version
 func TestServer_StreamAggregatedResources_BasicProtocol(t *testing.T) {
 	mgr := newTestManager(t)
 	aclResolve := func(id string) (acl.Authorizer, error) {
@@ -107,7 +109,7 @@ func TestServer_StreamAggregatedResources_BasicProtocol(t *testing.T) {
 	sid := structs.NewServiceID("web-sidecar-proxy", nil)
 
 	go func() {
-		err := s.StreamAggregatedResources(envoy.stream)
+		err := s.streamAggregatedResources(envoy.stream)
 		require.NoError(t, err)
 	}()
 
@@ -380,6 +382,8 @@ func assertResponse(t *testing.T, r *envoy_discovery_v3.DiscoveryResponse, wantJ
 	require.JSONEqf(t, wantJSON, gotJSON, "got:\n%s", gotJSON)
 }
 
+// NOTE: this test sidesteps the v3-only-does-incremental so it can test
+// v2-state-of-the-world-xDS indirectly via the v3 version
 func TestServer_StreamAggregatedResources_ACLEnforcement(t *testing.T) {
 
 	tests := []struct {
@@ -466,7 +470,7 @@ func TestServer_StreamAggregatedResources_ACLEnforcement(t *testing.T) {
 
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- s.StreamAggregatedResources(envoy.stream)
+				errCh <- s.streamAggregatedResources(envoy.stream)
 			}()
 
 			sid := structs.NewServiceID("web-sidecar-proxy", nil)
@@ -509,6 +513,8 @@ func TestServer_StreamAggregatedResources_ACLEnforcement(t *testing.T) {
 	}
 }
 
+// NOTE: this test sidesteps the v3-only-does-incremental so it can test
+// v2-state-of-the-world-xDS indirectly via the v3 version
 func TestServer_StreamAggregatedResources_ACLTokenDeleted_StreamTerminatedDuringDiscoveryRequest(t *testing.T) {
 	aclRules := `service "web" { policy = "write" }`
 	token := "service-write-on-web"
@@ -539,7 +545,7 @@ func TestServer_StreamAggregatedResources_ACLTokenDeleted_StreamTerminatedDuring
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.StreamAggregatedResources(envoy.stream)
+		errCh <- s.streamAggregatedResources(envoy.stream)
 	}()
 
 	getError := func() (gotErr error, ok bool) {
@@ -598,6 +604,8 @@ func TestServer_StreamAggregatedResources_ACLTokenDeleted_StreamTerminatedDuring
 	}
 }
 
+// NOTE: this test sidesteps the v3-only-does-incremental so it can test
+// v2-state-of-the-world-xDS indirectly via the v3 version
 func TestServer_StreamAggregatedResources_ACLTokenDeleted_StreamTerminatedInBackground(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
@@ -632,7 +640,7 @@ func TestServer_StreamAggregatedResources_ACLTokenDeleted_StreamTerminatedInBack
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.StreamAggregatedResources(envoy.stream)
+		errCh <- s.streamAggregatedResources(envoy.stream)
 	}()
 
 	getError := func() (gotErr error, ok bool) {
@@ -699,6 +707,8 @@ func TestServer_StreamAggregatedResources_ACLTokenDeleted_StreamTerminatedInBack
 	}
 }
 
+// NOTE: this test sidesteps the v3-only-does-incremental so it can test
+// v2-state-of-the-world-xDS indirectly via the v3 version
 func TestServer_StreamAggregatedResources_IngressEmptyResponse(t *testing.T) {
 	mgr := newTestManager(t)
 	aclResolve := func(id string) (acl.Authorizer, error) {
@@ -717,7 +727,7 @@ func TestServer_StreamAggregatedResources_IngressEmptyResponse(t *testing.T) {
 	sid := structs.NewServiceID("ingress-gateway", nil)
 
 	go func() {
-		err := s.StreamAggregatedResources(envoy.stream)
+		err := s.streamAggregatedResources(envoy.stream)
 		require.NoError(t, err)
 	}()
 
