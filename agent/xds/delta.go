@@ -98,10 +98,20 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 	// Configure handlers for each type of request we currently care about.
 	handlers := map[string]*xDSDeltaType{
-		ListenerType: newDeltaType(logger, stream, ListenerType), // TODO: allowempty (ingress)
-		RouteType:    newDeltaType(logger, stream, RouteType),    // TODO: allowempty (ingress)
-		ClusterType:  newDeltaType(logger, stream, ClusterType),  // TODO: allowempty (mesh/term/ingress)
-		EndpointType: newDeltaType(logger, stream, EndpointType),
+		ListenerType: newDeltaType(logger, stream, ListenerType, func(kind structs.ServiceKind) bool {
+			return cfgSnap.Kind == structs.ServiceKindIngressGateway
+		}),
+		RouteType: newDeltaType(logger, stream, RouteType, func(kind structs.ServiceKind) bool {
+			return cfgSnap.Kind == structs.ServiceKindIngressGateway
+		}),
+		ClusterType: newDeltaType(logger, stream, ClusterType, func(kind structs.ServiceKind) bool {
+			// Mesh, Ingress, and Terminating gateways are allowed to inform CDS of
+			// no clusters.
+			return cfgSnap.Kind == structs.ServiceKindMeshGateway ||
+				cfgSnap.Kind == structs.ServiceKindTerminatingGateway ||
+				cfgSnap.Kind == structs.ServiceKindIngressGateway
+		}),
+		EndpointType: newDeltaType(logger, stream, EndpointType, nil),
 	}
 
 	var deltaRetryFrequency = s.DeltaRetryFrequency
@@ -310,7 +320,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 				ListenerType,
 				RouteType,
 			} {
-				err := handlers[typeUrl].SendIfNew(currentVersions[typeUrl], resourceMap, &nonce)
+				err := handlers[typeUrl].SendIfNew(cfgSnap.Kind, currentVersions[typeUrl], resourceMap, &nonce)
 				if err != nil {
 					extendRetryTimer()
 					return err
@@ -321,11 +331,12 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 }
 
 type xDSDeltaType struct {
-	typeURL    string
-	stream     ADSDeltaStream
-	logger     hclog.Logger
-	registered bool
+	logger       hclog.Logger
+	stream       ADSDeltaStream
+	typeURL      string
+	allowEmptyFn func(kind structs.ServiceKind) bool
 
+	registered      bool
 	wildcard        bool
 	sentToEnvoyOnce bool
 
@@ -336,11 +347,17 @@ type xDSDeltaType struct {
 	pendingUpdates map[string]map[string]string
 }
 
-func newDeltaType(logger hclog.Logger, stream ADSDeltaStream, typeUrl string) *xDSDeltaType {
+func newDeltaType(
+	logger hclog.Logger,
+	stream ADSDeltaStream,
+	typeUrl string,
+	allowEmptyFn func(kind structs.ServiceKind) bool,
+) *xDSDeltaType {
 	return &xDSDeltaType{
-		typeURL:          typeUrl,
-		stream:           stream,
 		logger:           logger.With("typeUrl", typeUrl),
+		stream:           stream,
+		typeURL:          typeUrl,
+		allowEmptyFn:     allowEmptyFn,
 		resourceVersions: make(map[string]string),
 		pendingUpdates:   make(map[string]map[string]string),
 	}
@@ -362,6 +379,21 @@ func (t *xDSDeltaType) Recv(req *envoy_discovery_v3.DeltaDiscoveryRequest) bool 
 		t.registered = true
 		registeredThisTime = true
 	}
+
+	/*
+		DeltaDiscoveryRequest can be sent in the following situations:
+
+		Initial message in a xDS bidirectional gRPC stream.
+
+		As an ACK or NACK response to a previous DeltaDiscoveryResponse. In
+		this case the response_nonce is set to the nonce value in the Response.
+		ACK or NACK is determined by the absence or presence of error_detail.
+
+		Spontaneous DeltaDiscoveryRequests from the client. This can be done to
+		dynamically add or remove elements from the tracked resource_names set.
+		In this case response_nonce must be omitted.
+
+	*/
 
 	/*
 		DeltaDiscoveryRequest plays two independent roles. Any
@@ -441,11 +473,25 @@ func (t *xDSDeltaType) nack(nonce string) {
 }
 
 func (t *xDSDeltaType) SendIfNew(
+	kind structs.ServiceKind,
 	currentVersions map[string]string, // type => name => version (as consul knows right now)
 	resourceMap IndexedResources,
 	nonce *uint64,
 ) error {
 	if t == nil || !t.registered {
+		return nil
+	}
+
+	allowEmpty := t.allowEmptyFn != nil && t.allowEmptyFn(kind)
+
+	// Zero length resource responses should be ignored and are the result of no
+	// data yet. Notice that this caused a bug originally where we had zero
+	// healthy endpoints for an upstream that would cause Envoy to hang waiting
+	// for the EDS response. This is fixed though by ensuring we send an explicit
+	// empty LoadAssignment resource for the cluster rather than allowing junky
+	// empty resources.
+	if len(currentVersions) == 0 && !allowEmpty {
+		// Nothing to send yet
 		return nil
 	}
 
