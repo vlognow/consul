@@ -408,14 +408,6 @@ func (t *xDSType) Recv(req *envoy_discovery_v3.DiscoveryRequest, node *envoy_con
 	}
 }
 
-func (t *xDSType) Generate(cfgSnap *proxycfg.ConfigSnapshot) ([]proto.Message, error) {
-	cInfo := connectionInfo{
-		Token:         tokenFromContext(t.stream.Context()),
-		ProxyFeatures: t.proxyFeatures,
-	}
-	return t.resources(cInfo, cfgSnap)
-}
-
 func (t *xDSType) SendIfNew(cfgSnap *proxycfg.ConfigSnapshot, version uint64, nonce *uint64) error {
 	if t.req == nil {
 		return nil
@@ -425,7 +417,11 @@ func (t *xDSType) SendIfNew(cfgSnap *proxycfg.ConfigSnapshot, version uint64, no
 		return nil
 	}
 
-	resources, err := t.Generate(cfgSnap)
+	cInfo := connectionInfo{
+		Token:         tokenFromContext(t.stream.Context()),
+		ProxyFeatures: t.proxyFeatures,
+	}
+	resources, err := t.resources(cInfo, cfgSnap)
 	if err != nil {
 		return err
 	}
