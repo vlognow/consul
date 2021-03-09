@@ -13,9 +13,10 @@ import (
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	envoy_type_v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 
-	"github.com/hashicorp/consul/agent/xds/proxysupport"
 	"github.com/mitchellh/go-testing-interface"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/hashicorp/consul/agent/xds/proxysupport"
 )
 
 // TestADSStream mocks
