@@ -163,7 +163,7 @@ func TestServer_StreamAggregatedResources_v2_BasicProtocol_TCP(t *testing.T) {
 	// listener stays on v1.
 	envoy.SendReq(t, ClusterType, 2, 4)
 	envoy.SendReq(t, EndpointType, 2, 5)
-	envoy.SendReq(t, ListenerType, 1, 6) // v1 is a NACK (TODO(rb): this should have error detail info)
+	envoy.SendReq(t, ListenerType, 1, 6)
 
 	// Even though we nacked, we should still NOT get then v2 listeners
 	// redelivered since nothing has changed.

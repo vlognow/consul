@@ -655,27 +655,30 @@ func TestServer_DeltaAggregatedResources_v3_IngressEmptyResponse(t *testing.T) {
 	snap := proxycfg.TestConfigSnapshotIngressGatewayNoServices(t)
 	mgr.DeliverConfig(t, sid, snap)
 
-	emptyClusterResp := &envoy_discovery_v3.DeltaDiscoveryResponse{
+	// REQ: clusters
+	envoy.SendDeltaReq(t, ClusterType, nil)
+
+	// RESP: clustesr
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
 		TypeUrl: ClusterType,
 		Nonce:   hexString(1),
-	}
-	emptyListenerResp := &envoy_discovery_v3.DeltaDiscoveryResponse{
+	})
+
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+
+	// ACK: clusters
+	envoy.SendDeltaReqACK(t, ClusterType, 1, true, nil)
+
+	// REQ: listeners
+	envoy.SendDeltaReq(t, ListenerType, nil)
+
+	// RESP: listeners
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
 		TypeUrl: ListenerType,
 		Nonce:   hexString(2),
-	}
-	emptyRouteResp := &envoy_discovery_v3.DeltaDiscoveryResponse{
-		TypeUrl: RouteType,
-		Nonce:   hexString(3),
-	}
+	})
 
-	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, emptyClusterResp)
-
-	// Send initial listener discover
-	envoy.SendDeltaReq(t, ListenerType, nil)
-	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, emptyListenerResp)
-
-	envoy.SendDeltaReq(t, RouteType, nil)
-	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, emptyRouteResp)
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
 
 	envoy.Close()
 	select {
