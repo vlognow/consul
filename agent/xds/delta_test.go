@@ -1,6 +1,7 @@
 package xds
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	envoy_tcp_proxy_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	envoy_type_v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/golang/protobuf/ptypes"
 	"github.com/stretchr/testify/require"
@@ -431,9 +434,257 @@ func TestServer_DeltaAggregatedResources_v3_ACLEnforcement(t *testing.T) {
 	}
 }
 
-// TODO: fork TestServer_StreamAggregatedResources_v2_ACLTokenDeleted_StreamTerminatedDuringDiscoveryRequest
-// TODO: fork TestServer_StreamAggregatedResources_v2_ACLTokenDeleted_StreamTerminatedInBackground
-// TODO: fork TestServer_StreamAggregatedResources_v2_IngressEmptyResponse
+func TestServer_DeltaAggregatedResources_v3_ACLTokenDeleted_StreamTerminatedDuringDiscoveryRequest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
+	aclRules := `service "web" { policy = "write" }`
+	token := "service-write-on-web"
+
+	policy, err := acl.NewPolicyFromSource("", 0, aclRules, acl.SyntaxLegacy, nil, nil)
+	require.NoError(t, err)
+
+	var validToken atomic.Value
+	validToken.Store(token)
+
+	aclResolve := func(id string) (acl.Authorizer, error) {
+		if token := validToken.Load(); token == nil || id != token.(string) {
+			return nil, acl.ErrNotFound
+		}
+
+		return acl.NewPolicyAuthorizerWithDefaults(acl.RootAuthorizer("deny"), []*acl.Policy{policy}, nil)
+	}
+	scenario := newTestServerDeltaScenario(t, aclResolve, "web-sidecar-proxy", token,
+		100*time.Millisecond, // Make this short.
+	)
+	mgr, errCh, envoy := scenario.mgr, scenario.errCh, scenario.envoy
+
+	getError := func() (gotErr error, ok bool) {
+		select {
+		case err := <-errCh:
+			return err, true
+		default:
+			return nil, false
+		}
+	}
+
+	sid := structs.NewServiceID("web-sidecar-proxy", nil)
+	// Register the proxy to create state needed to Watch() on
+	mgr.RegisterProxy(t, sid)
+
+	// Send initial cluster discover (OK)
+	envoy.SendDeltaReq(t, ClusterType, nil)
+	{
+		err, ok := getError()
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+
+	// Check no response sent yet
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+	{
+		err, ok := getError()
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+
+	// Deliver a new snapshot
+	snap := newTestSnapshot(t, nil, "")
+	mgr.DeliverConfig(t, sid, snap)
+
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
+		TypeUrl: ClusterType,
+		Nonce:   hexString(1),
+		Resources: makeTestResources(t,
+			makeTestCluster(t, snap, "tcp:local_app"),
+			makeTestCluster(t, snap, "tcp:db"),
+			makeTestCluster(t, snap, "tcp:geo-cache"),
+		),
+	})
+
+	// It also (in parallel) issues the next cluster request (which acts as an ACK
+	// of the version we sent)
+	envoy.SendDeltaReq(t, ClusterType, nil)
+
+	// Check no response sent yet
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+	{
+		err, ok := getError()
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+
+	// Now nuke the ACL token while there's no activity.
+	validToken.Store("")
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		gerr, ok := status.FromError(err)
+		require.Truef(t, ok, "not a grpc status error: type='%T' value=%v", err, err)
+		require.Equal(t, codes.Unauthenticated, gerr.Code())
+		require.Equal(t, "unauthenticated: ACL not found", gerr.Message())
+
+		mgr.AssertWatchCancelled(t, sid)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("timed out waiting for handler to finish")
+	}
+}
+
+func TestServer_DeltaAggregatedResources_v3_ACLTokenDeleted_StreamTerminatedInBackground(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
+	aclRules := `service "web" { policy = "write" }`
+	token := "service-write-on-web"
+
+	policy, err := acl.NewPolicyFromSource("", 0, aclRules, acl.SyntaxLegacy, nil, nil)
+	require.NoError(t, err)
+
+	var validToken atomic.Value
+	validToken.Store(token)
+
+	aclResolve := func(id string) (acl.Authorizer, error) {
+		if token := validToken.Load(); token == nil || id != token.(string) {
+			return nil, acl.ErrNotFound
+		}
+
+		return acl.NewPolicyAuthorizerWithDefaults(acl.RootAuthorizer("deny"), []*acl.Policy{policy}, nil)
+	}
+	scenario := newTestServerDeltaScenario(t, aclResolve, "web-sidecar-proxy", token,
+		100*time.Millisecond, // Make this short.
+	)
+	mgr, errCh, envoy := scenario.mgr, scenario.errCh, scenario.envoy
+
+	getError := func() (gotErr error, ok bool) {
+		select {
+		case err := <-errCh:
+			return err, true
+		default:
+			return nil, false
+		}
+	}
+
+	sid := structs.NewServiceID("web-sidecar-proxy", nil)
+	// Register the proxy to create state needed to Watch() on
+	mgr.RegisterProxy(t, sid)
+
+	// Send initial cluster discover (OK)
+	envoy.SendDeltaReq(t, ClusterType, nil)
+	{
+		err, ok := getError()
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+
+	// Check no response sent yet
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+	{
+		err, ok := getError()
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+
+	// Deliver a new snapshot
+	snap := newTestSnapshot(t, nil, "")
+	mgr.DeliverConfig(t, sid, snap)
+
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
+		TypeUrl: ClusterType,
+		Nonce:   hexString(1),
+		Resources: makeTestResources(t,
+			makeTestCluster(t, snap, "tcp:local_app"),
+			makeTestCluster(t, snap, "tcp:db"),
+			makeTestCluster(t, snap, "tcp:geo-cache"),
+		),
+	})
+
+	// It also (in parallel) issues the next cluster request (which acts as an ACK
+	// of the version we sent)
+	envoy.SendDeltaReq(t, ClusterType, nil)
+
+	// Check no response sent yet
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+	{
+		err, ok := getError()
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+
+	// Now nuke the ACL token while there's no activity.
+	validToken.Store("")
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		gerr, ok := status.FromError(err)
+		require.Truef(t, ok, "not a grpc status error: type='%T' value=%v", err, err)
+		require.Equal(t, codes.Unauthenticated, gerr.Code())
+		require.Equal(t, "unauthenticated: ACL not found", gerr.Message())
+
+		mgr.AssertWatchCancelled(t, sid)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("timed out waiting for handler to finish")
+	}
+}
+
+// NOTE: this test sidesteps the v3-only-does-incremental so it can test
+// v2-state-of-the-world-xDS indirectly via the v3 version
+func TestServer_DeltaAggregatedResources_v3_IngressEmptyResponse(t *testing.T) {
+	aclResolve := func(id string) (acl.Authorizer, error) {
+		// Allow all
+		return acl.RootAuthorizer("manage"), nil
+	}
+	scenario := newTestServerDeltaScenario(t, aclResolve, "ingress-gateway", "", 0)
+	mgr, errCh, envoy := scenario.mgr, scenario.errCh, scenario.envoy
+
+	sid := structs.NewServiceID("ingress-gateway", nil)
+
+	// Register the proxy to create state needed to Watch() on
+	mgr.RegisterProxy(t, sid)
+
+	// Send initial cluster discover
+	envoy.SendDeltaReq(t, ClusterType, nil)
+
+	// Check no response sent yet
+	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+
+	// Deliver a new snapshot with no services
+	snap := proxycfg.TestConfigSnapshotIngressGatewayNoServices(t)
+	mgr.DeliverConfig(t, sid, snap)
+
+	emptyClusterResp := &envoy_discovery_v3.DeltaDiscoveryResponse{
+		TypeUrl: ClusterType,
+		Nonce:   hexString(1),
+	}
+	emptyListenerResp := &envoy_discovery_v3.DeltaDiscoveryResponse{
+		TypeUrl: ListenerType,
+		Nonce:   hexString(2),
+	}
+	emptyRouteResp := &envoy_discovery_v3.DeltaDiscoveryResponse{
+		TypeUrl: RouteType,
+		Nonce:   hexString(3),
+	}
+
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, emptyClusterResp)
+
+	// Send initial listener discover
+	envoy.SendDeltaReq(t, ListenerType, nil)
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, emptyListenerResp)
+
+	envoy.SendDeltaReq(t, RouteType, nil)
+	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, emptyRouteResp)
+
+	envoy.Close()
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(50 * time.Millisecond):
+		t.Fatalf("timed out waiting for handler to finish")
+	}
+}
 
 func assertDeltaChanBlocked(t *testing.T, ch chan *envoy_discovery_v3.DeltaDiscoveryResponse) {
 	t.Helper()
