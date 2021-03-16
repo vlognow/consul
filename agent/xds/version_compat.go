@@ -127,6 +127,82 @@ func convertDiscoveryRequestToV3(req *envoy_api_v2.DiscoveryRequest) (*envoy_dis
 	return &reqV3, nil
 }
 
+// convertClusterToV2 is only used in tests.
+func convertClusterToV2(resp *envoy_cluster_v3.Cluster) (*envoy_api_v2.Cluster, error) {
+	var pbuf proto.Buffer
+	if err := pbuf.Marshal(resp); err != nil {
+		return nil, err
+	}
+
+	var v2 envoy_api_v2.Cluster
+	if err := pbuf.Unmarshal(&v2); err != nil {
+		return nil, err
+	}
+
+	if err := convertTypedConfigsToV2(&v2); err != nil {
+		return nil, err
+	}
+
+	return &v2, nil
+}
+
+// convertClusterLoadAssignmentToV2 is only used in tests.
+func convertClusterLoadAssignmentToV2(resp *envoy_endpoint_v3.ClusterLoadAssignment) (*envoy_api_v2.ClusterLoadAssignment, error) {
+	var pbuf proto.Buffer
+	if err := pbuf.Marshal(resp); err != nil {
+		return nil, err
+	}
+
+	var v2 envoy_api_v2.ClusterLoadAssignment
+	if err := pbuf.Unmarshal(&v2); err != nil {
+		return nil, err
+	}
+
+	if err := convertTypedConfigsToV2(&v2); err != nil {
+		return nil, err
+	}
+
+	return &v2, nil
+}
+
+// convertRouteConfigurationToV2 is only used in tests.
+func convertRouteConfigurationToV2(resp *envoy_route_v3.RouteConfiguration) (*envoy_api_v2.RouteConfiguration, error) {
+	var pbuf proto.Buffer
+	if err := pbuf.Marshal(resp); err != nil {
+		return nil, err
+	}
+
+	var v2 envoy_api_v2.RouteConfiguration
+	if err := pbuf.Unmarshal(&v2); err != nil {
+		return nil, err
+	}
+
+	if err := convertTypedConfigsToV2(&v2); err != nil {
+		return nil, err
+	}
+
+	return &v2, nil
+}
+
+// convertListenerToV2 is only used in tests.
+func convertListenerToV2(resp *envoy_listener_v3.Listener) (*envoy_api_v2.Listener, error) {
+	var pbuf proto.Buffer
+	if err := pbuf.Marshal(resp); err != nil {
+		return nil, err
+	}
+
+	var v2 envoy_api_v2.Listener
+	if err := pbuf.Unmarshal(&v2); err != nil {
+		return nil, err
+	}
+
+	if err := convertTypedConfigsToV2(&v2); err != nil {
+		return nil, err
+	}
+
+	return &v2, nil
+}
+
 func convertDiscoveryResponseToV2(resp *envoy_discovery_v3.DiscoveryResponse) (*envoy_api_v2.DiscoveryResponse, error) {
 	var pbuf proto.Buffer
 	if err := pbuf.Marshal(resp); err != nil {

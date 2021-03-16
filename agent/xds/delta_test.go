@@ -24,6 +24,11 @@ import (
 	"github.com/hashicorp/consul/agent/structs"
 )
 
+// NOTE: For these tests, prefer not using xDS protobuf "factory" methods if
+// possible to avoid using them to test themselves.
+//
+// Stick to very straightforward stuff in xds_protocol_helpers_test.go.
+
 func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 	aclResolve := func(id string) (acl.Authorizer, error) {
 		// Allow all
@@ -45,8 +50,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
 
 	// Deliver a new snapshot (tcp with one tcp upstream)
-	snap := proxycfg.TestConfigSnapshotDiscoveryChainDefaultWithEntries(t)
-	snap.Proxy.Upstreams = snap.Proxy.Upstreams[0:1] // retain just "db"
+	snap := newTestSnapshot(t, nil, "")
 	mgr.DeliverConfig(t, sid, snap)
 
 	assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
@@ -55,6 +59,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 		Resources: makeTestResources(t,
 			makeTestCluster(t, snap, "tcp:local_app"),
 			makeTestCluster(t, snap, "tcp:db"),
+			makeTestCluster(t, snap, "tcp:geo-cache"),
 		),
 	})
 
@@ -68,6 +73,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 	envoy.SendDeltaReq(t, EndpointType, &envoy_discovery_v3.DeltaDiscoveryRequest{
 		ResourceNamesSubscribe: []string{
 			"db.default.dc1.internal.11111111-2222-3333-4444-555555555555.consul",
+			"geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul",
 		},
 	})
 
@@ -84,6 +90,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 		Nonce:   hexString(2),
 		Resources: makeTestResources(t,
 			makeTestEndpoints(t, snap, "tcp:db"),
+			makeTestEndpoints(t, snap, "tcp:geo-cache"),
 		),
 	})
 
@@ -105,6 +112,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 		Resources: makeTestResources(t,
 			makeTestListener(t, snap, "tcp:public_listener"),
 			makeTestListener(t, snap, "tcp:db"),
+			makeTestListener(t, snap, "tcp:geo-cache"),
 		),
 	})
 
@@ -117,6 +125,8 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 
 	// And no other response yet
 	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
+
+	// TODO: test NACK
 
 	envoy.Close()
 	select {
@@ -148,17 +158,11 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 	assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
 
 	// Deliver a new snapshot (tcp with one http upstream)
-	snap := proxycfg.TestConfigSnapshotDiscoveryChainDefaultWithEntries(t, &structs.ServiceConfigEntry{
+	snap := newTestSnapshot(t, nil, "http2", &structs.ServiceConfigEntry{
 		Kind:     structs.ServiceDefaults,
 		Name:     "db",
 		Protocol: "http2",
 	})
-	snap.Proxy.Upstreams = snap.Proxy.Upstreams[0:1]     // retain just "db"
-	snap.Proxy.Upstreams[0].Config["protocol"] = "http2" // Simulate ServiceManager injection of protocol
-	var (
-		origRoots = snap.Roots
-		origLeaf  = snap.ConnectProxy.Leaf
-	)
 	mgr.DeliverConfig(t, sid, snap)
 
 	require.True(t, t.Run("no-rds", func(t *testing.T) {
@@ -168,6 +172,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 			Resources: makeTestResources(t,
 				makeTestCluster(t, snap, "tcp:local_app"),
 				makeTestCluster(t, snap, "http2:db"),
+				makeTestCluster(t, snap, "tcp:geo-cache"),
 			),
 		})
 
@@ -181,6 +186,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 		envoy.SendDeltaReq(t, EndpointType, &envoy_discovery_v3.DeltaDiscoveryRequest{
 			ResourceNamesSubscribe: []string{
 				"db.default.dc1.internal.11111111-2222-3333-4444-555555555555.consul",
+				"geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul",
 			},
 		})
 
@@ -197,6 +203,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 			Nonce:   hexString(2),
 			Resources: makeTestResources(t,
 				makeTestEndpoints(t, snap, "http2:db"),
+				makeTestEndpoints(t, snap, "tcp:geo-cache"),
 			),
 		})
 
@@ -218,6 +225,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 			Resources: makeTestResources(t,
 				makeTestListener(t, snap, "tcp:public_listener"),
 				makeTestListener(t, snap, "http2:db"),
+				makeTestListener(t, snap, "tcp:geo-cache"),
 			),
 		})
 
@@ -234,7 +242,7 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 
 	// -- reconfigure with a no-op discovery chain
 
-	snap = proxycfg.TestConfigSnapshotDiscoveryChainDefaultWithEntries(t, &structs.ServiceConfigEntry{
+	snap = newTestSnapshot(t, snap, "http2", &structs.ServiceConfigEntry{
 		Kind:     structs.ServiceDefaults,
 		Name:     "db",
 		Protocol: "http2",
@@ -243,10 +251,6 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 		Name:   "db",
 		Routes: nil,
 	})
-	snap.Roots = origRoots
-	snap.ConnectProxy.Leaf = origLeaf
-	snap.Proxy.Upstreams = snap.Proxy.Upstreams[0:1]     // retain just "db"
-	snap.Proxy.Upstreams[0].Config["protocol"] = "http2" // Simulate ServiceManager injection of protocol
 	mgr.DeliverConfig(t, sid, snap)
 
 	require.True(t, t.Run("with-rds", func(t *testing.T) {
@@ -293,22 +297,6 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 		assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
 	}))
 
-	// // It also (in parallel) issues the listener ACK
-	// // { "typeUrl": "type.googleapis.com/envoy.config.listener.v3.Listener", "responseNonce": "00000003" }
-	// envoy.SendDeltaReqACK(t, ListenerType, 3, true, nil)
-
-	// // And should get a response immediately.
-	// assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
-	// 	TypeUrl: RouteType,
-	// 	Nonce:   hexString(4),
-	// 	Resources: makeTestResources(t,
-	// 		makeTestRoute(t, "tcp:db"),
-	// 	),
-	// })
-
-	// // And no other response yet
-	// assertDeltaChanBlocked(t, envoy.deltaStream.sendCh)
-
 	envoy.Close()
 	select {
 	case err := <-errCh:
@@ -317,6 +305,11 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 		t.Fatalf("timed out waiting for handler to finish")
 	}
 }
+
+// TODO: fork TestServer_StreamAggregatedResources_v2_ACLEnforcement
+// TODO: fork TestServer_StreamAggregatedResources_v2_ACLTokenDeleted_StreamTerminatedDuringDiscoveryRequest
+// TODO: fork TestServer_StreamAggregatedResources_v2_ACLTokenDeleted_StreamTerminatedInBackground
+// TODO: fork TestServer_StreamAggregatedResources_v2_IngressEmptyResponse
 
 func assertDeltaChanBlocked(t *testing.T, ch chan *envoy_discovery_v3.DeltaDiscoveryResponse) {
 	t.Helper()
@@ -405,6 +398,20 @@ func makeTestCluster(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName st
 			TransportSocket:      xdsNewUpstreamTransportSocket(t, snap, "db.default.dc1.internal.11111111-2222-3333-4444-555555555555.consul"),
 			Http2ProtocolOptions: &envoy_core_v3.Http2ProtocolOptions{},
 		}
+	case "tcp:geo-cache":
+		return &envoy_cluster_v3.Cluster{
+			Name: "geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul",
+			ClusterDiscoveryType: &envoy_cluster_v3.Cluster_Type{
+				Type: envoy_cluster_v3.Cluster_EDS,
+			},
+			EdsClusterConfig: &envoy_cluster_v3.Cluster_EdsClusterConfig{
+				EdsConfig: xdsNewADSConfig(),
+			},
+			CircuitBreakers:  &envoy_cluster_v3.CircuitBreakers{},
+			OutlierDetection: &envoy_cluster_v3.OutlierDetection{},
+			ConnectTimeout:   ptypes.DurationProto(5 * time.Second),
+			TransportSocket:  xdsNewUpstreamTransportSocket(t, snap, "geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul"),
+		}
 	default:
 		t.Fatalf("unexpected fixture name: %s", fixtureName)
 		return nil
@@ -437,6 +444,18 @@ func makeTestEndpoints(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName 
 				},
 			},
 		}
+	case "tcp:geo-cache":
+		return &envoy_endpoint_v3.ClusterLoadAssignment{
+			ClusterName: "geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul",
+			Endpoints: []*envoy_endpoint_v3.LocalityLbEndpoints{
+				{
+					LbEndpoints: []*envoy_endpoint_v3.LbEndpoint{
+						xdsNewEndpointWithHealth("10.10.1.1", 8080, envoy_core_v3.HealthStatus_HEALTHY, 1),
+						xdsNewEndpointWithHealth("10.10.1.2", 8080, envoy_core_v3.HealthStatus_HEALTHY, 1),
+					},
+				},
+			},
+		}
 	default:
 		t.Fatalf("unexpected fixture name: %s", fixtureName)
 		return nil
@@ -454,11 +473,11 @@ func makeTestListener(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName s
 				{
 					TransportSocket: xdsNewPublicTransportSocket(t, snap),
 					Filters: []*envoy_listener_v3.Filter{
-						mustMakeFilter(t, "envoy.filters.network.rbac", &envoy_network_rbac_v3.RBAC{
+						xdsNewFilter(t, "envoy.filters.network.rbac", &envoy_network_rbac_v3.RBAC{
 							Rules:      &envoy_rbac_v3.RBAC{},
 							StatPrefix: "connect_authz",
 						}),
-						mustMakeFilter(t, "envoy.filters.network.tcp_proxy", &envoy_tcp_proxy_v3.TcpProxy{
+						xdsNewFilter(t, "envoy.filters.network.tcp_proxy", &envoy_tcp_proxy_v3.TcpProxy{
 							ClusterSpecifier: &envoy_tcp_proxy_v3.TcpProxy_Cluster{
 								Cluster: "local_app",
 							},
@@ -476,7 +495,7 @@ func makeTestListener(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName s
 			FilterChains: []*envoy_listener_v3.FilterChain{
 				{
 					Filters: []*envoy_listener_v3.Filter{
-						mustMakeFilter(t, "envoy.filters.network.tcp_proxy", &envoy_tcp_proxy_v3.TcpProxy{
+						xdsNewFilter(t, "envoy.filters.network.tcp_proxy", &envoy_tcp_proxy_v3.TcpProxy{
 							ClusterSpecifier: &envoy_tcp_proxy_v3.TcpProxy_Cluster{
 								Cluster: "db.default.dc1.internal.11111111-2222-3333-4444-555555555555.consul",
 							},
@@ -494,7 +513,7 @@ func makeTestListener(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName s
 			FilterChains: []*envoy_listener_v3.FilterChain{
 				{
 					Filters: []*envoy_listener_v3.Filter{
-						mustMakeFilter(t, "envoy.filters.network.http_connection_manager", &envoy_http_v3.HttpConnectionManager{
+						xdsNewFilter(t, "envoy.filters.network.http_connection_manager", &envoy_http_v3.HttpConnectionManager{
 							HttpFilters: []*envoy_http_v3.HttpFilter{
 								{Name: "envoy.filters.http.router"},
 							},
@@ -519,7 +538,7 @@ func makeTestListener(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName s
 			FilterChains: []*envoy_listener_v3.FilterChain{
 				{
 					Filters: []*envoy_listener_v3.Filter{
-						mustMakeFilter(t, "envoy.filters.network.http_connection_manager", &envoy_http_v3.HttpConnectionManager{
+						xdsNewFilter(t, "envoy.filters.network.http_connection_manager", &envoy_http_v3.HttpConnectionManager{
 							HttpFilters: []*envoy_http_v3.HttpFilter{
 								{Name: "envoy.filters.http.router"},
 							},
@@ -534,6 +553,24 @@ func makeTestListener(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName s
 								RandomSampling: &envoy_type_v3.Percent{Value: 0},
 							},
 							Http2ProtocolOptions: &envoy_core_v3.Http2ProtocolOptions{},
+						}),
+					},
+				},
+			},
+		}
+	case "tcp:geo-cache":
+		return &envoy_listener_v3.Listener{
+			Name:             "prepared_query:geo-cache:127.10.10.10:8181",
+			Address:          makeAddress("127.10.10.10", 8181),
+			TrafficDirection: envoy_core_v3.TrafficDirection_OUTBOUND,
+			FilterChains: []*envoy_listener_v3.FilterChain{
+				{
+					Filters: []*envoy_listener_v3.Filter{
+						xdsNewFilter(t, "envoy.filters.network.tcp_proxy", &envoy_tcp_proxy_v3.TcpProxy{
+							ClusterSpecifier: &envoy_tcp_proxy_v3.TcpProxy_Cluster{
+								Cluster: "geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul",
+							},
+							StatPrefix: "upstream.prepared_query_geo-cache",
 						}),
 					},
 				},
