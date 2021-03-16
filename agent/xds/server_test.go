@@ -6,10 +6,6 @@ import (
 	"time"
 
 	envoy_api_v2 "github.com/envoyproxy/go-control-plane/envoy/api/v2"
-	envoy_cluster_v3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
-	envoy_endpoint_v3 "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
-	envoy_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
-	envoy_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 
 	"github.com/stretchr/testify/require"
@@ -792,37 +788,29 @@ func assertResponse(t *testing.T, got, want *envoy_api_v2.DiscoveryResponse) {
 }
 
 func makeTestListener_v2(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName string) *envoy_api_v2.Listener {
-	convert := func(v3 *envoy_listener_v3.Listener) *envoy_api_v2.Listener {
-		v2, err := convertListenerToV2(v3)
-		require.NoError(t, err)
-		return v2
-	}
-	return convert(makeTestListener(t, snap, fixtureName))
+	v3 := makeTestListener(t, snap, fixtureName)
+	v2, err := convertListenerToV2(v3)
+	require.NoError(t, err)
+	return v2
 }
 
 func makeTestCluster_v2(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName string) *envoy_api_v2.Cluster {
-	convert := func(v3 *envoy_cluster_v3.Cluster) *envoy_api_v2.Cluster {
-		v2, err := convertClusterToV2(v3)
-		require.NoError(t, err)
-		return v2
-	}
-	return convert(makeTestCluster(t, snap, fixtureName))
+	v3 := makeTestCluster(t, snap, fixtureName)
+	v2, err := convertClusterToV2(v3)
+	require.NoError(t, err)
+	return v2
 }
 
 func makeTestEndpoints_v2(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName string) *envoy_api_v2.ClusterLoadAssignment {
-	convert := func(v3 *envoy_endpoint_v3.ClusterLoadAssignment) *envoy_api_v2.ClusterLoadAssignment {
-		v2, err := convertClusterLoadAssignmentToV2(v3)
-		require.NoError(t, err)
-		return v2
-	}
-	return convert(makeTestEndpoints(t, snap, fixtureName))
+	v3 := makeTestEndpoints(t, snap, fixtureName)
+	v2, err := convertClusterLoadAssignmentToV2(v3)
+	require.NoError(t, err)
+	return v2
 }
 
 func makeTestRoute_v2(t *testing.T, fixtureName string) *envoy_api_v2.RouteConfiguration {
-	convert := func(v3 *envoy_route_v3.RouteConfiguration) *envoy_api_v2.RouteConfiguration {
-		v2, err := convertRouteConfigurationToV2(v3)
-		require.NoError(t, err)
-		return v2
-	}
-	return convert(makeTestRoute(t, fixtureName))
+	v3 := makeTestRoute(t, fixtureName)
+	v2, err := convertRouteConfigurationToV2(v3)
+	require.NoError(t, err)
+	return v2
 }
