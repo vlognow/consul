@@ -306,7 +306,131 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_HTTP2(t *testing.T) {
 	}
 }
 
-// TODO: fork TestServer_StreamAggregatedResources_v2_ACLEnforcement
+func TestServer_DeltaAggregatedResources_v3_ACLEnforcement(t *testing.T) {
+	tests := []struct {
+		name        string
+		defaultDeny bool
+		acl         string
+		token       string
+		wantDenied  bool
+		cfgSnap     *proxycfg.ConfigSnapshot
+	}{
+		// Note that although we've stubbed actual ACL checks in the testManager
+		// ConnectAuthorize mock, by asserting against specific reason strings here
+		// even in the happy case which can't match the default one returned by the
+		// mock we are implicitly validating that the implementation used the
+		// correct token from the context.
+		{
+			name:        "no ACLs configured",
+			defaultDeny: false,
+			wantDenied:  false,
+		},
+		{
+			name:        "default deny, no token",
+			defaultDeny: true,
+			wantDenied:  true,
+		},
+		{
+			name:        "default deny, write token",
+			defaultDeny: true,
+			acl:         `service "web" { policy = "write" }`,
+			token:       "service-write-on-web",
+			wantDenied:  false,
+		},
+		{
+			name:        "default deny, read token",
+			defaultDeny: true,
+			acl:         `service "web" { policy = "read" }`,
+			token:       "service-write-on-web",
+			wantDenied:  true,
+		},
+		{
+			name:        "default deny, write token on different service",
+			defaultDeny: true,
+			acl:         `service "not-web" { policy = "write" }`,
+			token:       "service-write-on-not-web",
+			wantDenied:  true,
+		},
+		{
+			name:        "ingress default deny, write token on different service",
+			defaultDeny: true,
+			acl:         `service "not-ingress" { policy = "write" }`,
+			token:       "service-write-on-not-ingress",
+			wantDenied:  true,
+			cfgSnap:     proxycfg.TestConfigSnapshotIngressGateway(t),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aclResolve := func(id string) (acl.Authorizer, error) {
+				if !tt.defaultDeny {
+					// Allow all
+					return acl.RootAuthorizer("allow"), nil
+				}
+				if tt.acl == "" {
+					// No token and defaultDeny is denied
+					return acl.RootAuthorizer("deny"), nil
+				}
+				// Ensure the correct token was passed
+				require.Equal(t, tt.token, id)
+				// Parse the ACL and enforce it
+				policy, err := acl.NewPolicyFromSource("", 0, tt.acl, acl.SyntaxLegacy, nil, nil)
+				require.NoError(t, err)
+				return acl.NewPolicyAuthorizerWithDefaults(acl.RootAuthorizer("deny"), []*acl.Policy{policy}, nil)
+			}
+
+			scenario := newTestServerDeltaScenario(t, aclResolve, "web-sidecar-proxy", tt.token, 0)
+			mgr, errCh, envoy := scenario.mgr, scenario.errCh, scenario.envoy
+
+			sid := structs.NewServiceID("web-sidecar-proxy", nil)
+			// Register the proxy to create state needed to Watch() on
+			mgr.RegisterProxy(t, sid)
+
+			// Deliver a new snapshot
+			snap := tt.cfgSnap
+			if snap == nil {
+				snap = newTestSnapshot(t, nil, "")
+			}
+			mgr.DeliverConfig(t, sid, snap)
+
+			// Send initial listener discover, in real life Envoy always sends cluster
+			// first but it doesn't really matter and listener has a response that
+			// includes the token in the ext rbac filter so lets us test more stuff.
+			envoy.SendDeltaReq(t, ListenerType, nil)
+
+			if !tt.wantDenied {
+				assertDeltaResponseSent(t, envoy.deltaStream.sendCh, &envoy_discovery_v3.DeltaDiscoveryResponse{
+					TypeUrl: ListenerType,
+					Nonce:   hexString(1),
+					Resources: makeTestResources(t,
+						makeTestListener(t, snap, "tcp:public_listener"),
+						makeTestListener(t, snap, "tcp:db"),
+						makeTestListener(t, snap, "tcp:geo-cache"),
+					),
+				})
+				// Close the client stream since all is well. We _don't_ do this in the
+				// expected error case because we want to verify the error closes the
+				// stream from server side.
+				envoy.Close()
+			}
+
+			select {
+			case err := <-errCh:
+				if tt.wantDenied {
+					require.Error(t, err)
+					require.Contains(t, err.Error(), "permission denied")
+					mgr.AssertWatchCancelled(t, sid)
+				} else {
+					require.NoError(t, err)
+				}
+			case <-time.After(50 * time.Millisecond):
+				t.Fatalf("timed out waiting for handler to finish")
+			}
+		})
+	}
+}
+
 // TODO: fork TestServer_StreamAggregatedResources_v2_ACLTokenDeleted_StreamTerminatedDuringDiscoveryRequest
 // TODO: fork TestServer_StreamAggregatedResources_v2_ACLTokenDeleted_StreamTerminatedInBackground
 // TODO: fork TestServer_StreamAggregatedResources_v2_IngressEmptyResponse
