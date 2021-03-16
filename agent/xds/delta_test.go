@@ -27,6 +27,16 @@ import (
 	"github.com/hashicorp/consul/agent/structs"
 )
 
+/* TODO: Test scenarios
+
+- initial resource versions
+- removing resources
+- nack
+- unsubscribe
+- error during handling causing retry
+
+*/
+
 // NOTE: For these tests, prefer not using xDS protobuf "factory" methods if
 // possible to avoid using them to test themselves.
 //
@@ -77,6 +87,8 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 		ResourceNamesSubscribe: []string{
 			"db.default.dc1.internal.11111111-2222-3333-4444-555555555555.consul",
 			"geo-cache.default.dc1.query.11111111-2222-3333-4444-555555555555.consul",
+			// see what happens if you try to subscribe to an unknown thing
+			"fake-endpoints",
 		},
 	})
 
@@ -95,6 +107,9 @@ func TestServer_DeltaAggregatedResources_v3_BasicProtocol_TCP(t *testing.T) {
 			makeTestEndpoints(t, snap, "tcp:db"),
 			makeTestEndpoints(t, snap, "tcp:geo-cache"),
 		),
+		RemovedResources: []string{
+			"fake-endpoints", // correcting the errant subscription
+		},
 	})
 
 	// And no other response yet

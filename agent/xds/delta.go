@@ -471,7 +471,11 @@ func (t *xDSDeltaType) ack(nonce string) {
 	}
 
 	for name, version := range pending {
-		t.resourceVersions[name] = version
+		if version == "" {
+			delete(t.resourceVersions, name)
+		} else {
+			t.resourceVersions[name] = version
+		}
 	}
 	t.sentToEnvoyOnce = true
 	delete(t.pendingUpdates, nonce)
