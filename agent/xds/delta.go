@@ -164,7 +164,7 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			}
 			logger.Trace("event was delta discovery request", "typeUrl", req.TypeUrl)
 
-			s.logDebugRequest("Incremental xDS v3", req)
+			s.logDebugRequest("Incremental xDS v3 REQ", req)
 
 			if req.TypeUrl == "" {
 				return status.Errorf(codes.InvalidArgument, "type URL is required for ADS")
@@ -294,46 +294,61 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 
 			logger.Trace("Invoking all xDS resource handlers and sending changed data if there are any")
 
-			// TODO:
-			/*
-				Knowing When a Requested Resource Does Not Exist
-
-				When a resource subscribed to by a client does not exist, the
-				server will send a Resource whose name field matches the name
-				that the client subscribed to and whose resource field is
-				unset. This allows the client to quickly determine when a
-				resource does not exist without waiting for a timeout, as would
-				be done in the SotW protocol variants. However, clients are
-				still encouraged to use a timeout to protect against the case
-				where the management server fails to send a response in a
-				timely manner.
-			*/
-
-			/*
-				CDS updates (if any) must always be pushed first.
-
-				EDS updates (if any) must arrive after CDS updates for the respective clusters.
-
-				LDS updates must arrive after corresponding CDS/EDS updates.
-
-				RDS updates related to the newly added listeners must arrive after CDS/EDS/LDS updates.
-
-				// TODO: THEN DO CDS DELETES
-			*/
-			for _, typeUrl := range []string{
-				ClusterType,
-				EndpointType,
-				ListenerType,
-				RouteType,
-			} {
-				err := handlers[typeUrl].SendIfNew(cfgSnap.Kind, currentVersions[typeUrl], resourceMap, &nonce)
+			sentType := make(map[string]struct{}) // use this to only do one kind of mutation per type per execution
+			for _, op := range xDSUpdateOrder {
+				if _, sent := sentType[op.TypeUrl]; sent {
+					continue
+				}
+				logger.Trace("xDS operation attempt", "typeUrl", op.TypeUrl, "upsert", op.Upsert, "remove", op.Remove)
+				err, sent := handlers[op.TypeUrl].SendIfNew(
+					cfgSnap.Kind,
+					currentVersions[op.TypeUrl],
+					resourceMap,
+					&nonce,
+					op.Upsert,
+					op.Remove,
+				)
 				if err != nil {
 					extendRetryTimer()
 					return err
 				}
+				if sent {
+					sentType[op.TypeUrl] = struct{}{}
+				}
 			}
 		}
 	}
+}
+
+var xDSUpdateOrder = []xDSUpdateOperation{
+	// 1. CDS updates (if any) must always be pushed first.
+	{TypeUrl: ClusterType, Upsert: true},
+	// 2. EDS updates (if any) must arrive after CDS updates for the respective clusters.
+	{TypeUrl: EndpointType, Upsert: true},
+	// 3. LDS updates must arrive after corresponding CDS/EDS updates.
+	{TypeUrl: ListenerType, Upsert: true, Remove: true},
+	// 4. RDS updates related to the newly added listeners must arrive after CDS/EDS/LDS updates.
+	{TypeUrl: RouteType, Upsert: true, Remove: true},
+	// 5. (NOT IMPLEMENTED YET IN CONSUL) VHDS updates (if any) related to the newly added RouteConfigurations must arrive after RDS updates.
+	// {},
+	// 6. Stale CDS clusters and related EDS endpoints (ones no longer being referenced) can then be removed.
+	{TypeUrl: ClusterType, Remove: true},
+	{TypeUrl: EndpointType, Remove: true},
+	// xDS updates can be pushed independently if no new
+	// clusters/routes/listeners are added or if it’s acceptable to
+	// temporarily drop traffic during updates. Note that in case of
+	// LDS updates, the listeners will be warmed before they receive
+	// traffic, i.e. the dependent routes are fetched through RDS if
+	// configured. Clusters are warmed when adding/removing/updating
+	// clusters. On the other hand, routes are not warmed, i.e., the
+	// management plane must ensure that clusters referenced by a route
+	// are in place, before pushing the updates for a route.
+}
+
+type xDSUpdateOperation struct {
+	TypeUrl string
+	Upsert  bool
+	Remove  bool
 }
 
 type xDSDeltaType struct {
@@ -445,11 +460,30 @@ func (t *xDSDeltaType) Recv(req *envoy_discovery_v3.DeltaDiscoveryRequest) bool 
 			resource_names_unsubscribe), or
 		*/
 		for _, name := range req.ResourceNamesSubscribe {
-			if _, ok := t.resourceVersions[name]; ok {
-				continue
-			}
+			// A resource_names_subscribe field may contain resource names that
+			// the server believes the client is already subscribed to, and
+			// furthermore has the most recent versions of. However, the server
+			// must still provide those resources in the response; due to
+			// implementation details hidden from the server, the client may
+			// have “forgotten” those resources despite apparently remaining
+			// subscribed.
+			//
+			// NOTE: the server must respond with all resources listed in
+			// resource_names_subscribe, even if it believes the client has the
+			// most recent version of them. The reason: the client may have
+			// dropped them, but then regained interest before it had a chance
+			// to send the unsubscribe message.
+			//
+			// We handle that here by ALWAYS wiping the version so the diff
+			// decides to send the value.
+			_, alreadySubscribed := t.resourceVersions[name]
 			t.resourceVersions[name] = "" // start with no version
-			t.logger.Trace("subscribing resource for stream", "resource", name)
+
+			if alreadySubscribed {
+				t.logger.Trace("re-subscribing resource for stream", "resource", name)
+			} else {
+				t.logger.Trace("subscribing resource for stream", "resource", name)
+			}
 		}
 
 		for _, name := range req.ResourceNamesUnsubscribe {
@@ -490,9 +524,10 @@ func (t *xDSDeltaType) SendIfNew(
 	currentVersions map[string]string, // type => name => version (as consul knows right now)
 	resourceMap IndexedResources,
 	nonce *uint64,
-) error {
+	upsert, remove bool,
+) (error, bool) {
 	if t == nil || !t.registered {
-		return nil
+		return nil, false
 	}
 
 	allowEmpty := t.allowEmptyFn != nil && t.allowEmptyFn(kind)
@@ -505,47 +540,57 @@ func (t *xDSDeltaType) SendIfNew(
 	// empty resources.
 	if len(currentVersions) == 0 && !allowEmpty {
 		// Nothing to send yet
-		return nil
+		return nil, false
 	}
 
-	resp, updates, err := t.createDeltaResponse(currentVersions, resourceMap)
+	resp, updates, err := t.createDeltaResponse(currentVersions, resourceMap, upsert, remove)
 	if err != nil {
-		return err
+		return err, false
 	}
 
 	if resp == nil {
 		t.logger.Trace("no response generated")
-		return nil
+		return nil, false
 	}
 
 	*nonce++
 	resp.Nonce = fmt.Sprintf("%08x", *nonce)
 
-	t.logDebugResponse("Incremental xDS v3", resp)
+	t.logDebugResponse("Incremental xDS v3 RESP", resp)
 
 	t.logger.Trace("sending response", "nonce", resp.Nonce)
 	if err := t.stream.Send(resp); err != nil {
-		return err
+		return err, false
 	}
 	t.logger.Trace("sent response", "nonce", resp.Nonce)
 
 	t.pendingUpdates[resp.Nonce] = updates
 
-	return nil
+	return nil, true
 }
 
 func (t *xDSDeltaType) createDeltaResponse(
-	currentVersions map[string]string, // type => name => version (as consul knows right now)
+	currentVersions map[string]string, // name => version (as consul knows right now)
 	resourceMap IndexedResources,
+	upsert, remove bool,
 ) (*envoy_discovery_v3.DeltaDiscoveryResponse, map[string]string, error) {
 	// compute difference
-	updates := make(map[string]string)
+	var (
+		hasRelevantUpdates = false
+		updates            = make(map[string]string)
+	)
 	// First find things that need updating or deleting
 	for name, envoyVers := range t.resourceVersions {
 		currVers, ok := currentVersions[name]
 		if !ok {
+			if remove {
+				hasRelevantUpdates = true
+			}
 			updates[name] = ""
 		} else if currVers != envoyVers {
+			if upsert {
+				hasRelevantUpdates = true
+			}
 			updates[name] = currVers
 		}
 	}
@@ -555,11 +600,14 @@ func (t *xDSDeltaType) createDeltaResponse(
 		for name, currVers := range currentVersions {
 			if _, ok := t.resourceVersions[name]; !ok {
 				updates[name] = currVers
+				if upsert {
+					hasRelevantUpdates = true
+				}
 			}
 		}
 	}
 
-	if len(updates) == 0 && t.sentToEnvoyOnce {
+	if !hasRelevantUpdates && t.sentToEnvoyOnce {
 		return nil, nil, nil
 	}
 
@@ -567,11 +615,28 @@ func (t *xDSDeltaType) createDeltaResponse(
 	resp := &envoy_discovery_v3.DeltaDiscoveryResponse{
 		// SystemVersionInfo    string      `protobuf:"bytes,1,opt,name=system_version_info,json=systemVersionInfo,proto3" json:"system_version_info,omitempty"`
 		TypeUrl: t.typeURL,
+		SystemVersionInfo: fmt.Sprintf(
+			"num_updates=%d num_items=%d num_resources=%d upsert=%v remove=%v sentOnce=%v items=%+v resources=%+v",
+			len(updates),
+			len(currentVersions),
+			len(resourceMap[t.typeURL]),
+			upsert,
+			remove,
+			t.sentToEnvoyOnce,
+			currentVersions,
+			resourceMap[t.typeURL],
+		),
 	}
 	for name, vers := range updates {
 		if vers == "" {
-			resp.RemovedResources = append(resp.RemovedResources, name)
-		} else {
+			if remove {
+				resp.RemovedResources = append(resp.RemovedResources, name)
+			} else if !t.wildcard {
+				resp.Resources = append(resp.Resources, &envoy_discovery_v3.Resource{
+					Name: name,
+				})
+			}
+		} else if upsert {
 			resources, ok := resourceMap[t.typeURL]
 			if !ok {
 				return nil, nil, fmt.Errorf("unknown type url: %s", t.typeURL)
