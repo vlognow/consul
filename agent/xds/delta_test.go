@@ -811,7 +811,7 @@ func makeTestCluster(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName st
 	}
 }
 
-func makeTestEndpoints(t *testing.T, snap *proxycfg.ConfigSnapshot, fixtureName string) *envoy_endpoint_v3.ClusterLoadAssignment {
+func makeTestEndpoints(t *testing.T, _ *proxycfg.ConfigSnapshot, fixtureName string) *envoy_endpoint_v3.ClusterLoadAssignment {
 	switch fixtureName {
 	case "tcp:db":
 		return &envoy_endpoint_v3.ClusterLoadAssignment{
