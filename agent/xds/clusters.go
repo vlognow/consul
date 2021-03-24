@@ -24,7 +24,7 @@ import (
 )
 
 // clustersFromSnapshot returns the xDS API representation of the "clusters" in the snapshot.
-func (s *Server) clustersFromSnapshot(_ connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) ([]proto.Message, error) {
+func (s *Server) clustersFromSnapshot(cInfo connectionInfo, cfgSnap *proxycfg.ConfigSnapshot) ([]proto.Message, error) {
 	if cfgSnap == nil {
 		return nil, errors.New("nil config given")
 	}
@@ -33,14 +33,54 @@ func (s *Server) clustersFromSnapshot(_ connectionInfo, cfgSnap *proxycfg.Config
 	case structs.ServiceKindConnectProxy:
 		return s.clustersFromSnapshotConnectProxy(cfgSnap)
 	case structs.ServiceKindTerminatingGateway:
-		return s.makeGatewayServiceClusters(cfgSnap, cfgSnap.TerminatingGateway.ServiceGroups, cfgSnap.TerminatingGateway.ServiceResolvers)
+		res, err := s.makeGatewayServiceClusters(cfgSnap, cfgSnap.TerminatingGateway.ServiceGroups, cfgSnap.TerminatingGateway.ServiceResolvers)
+		if err != nil {
+			return nil, err
+		}
+		return maybeInjectStubClusterForGateways(cInfo, res)
 	case structs.ServiceKindMeshGateway:
-		return s.clustersFromSnapshotMeshGateway(cfgSnap)
+		res, err := s.clustersFromSnapshotMeshGateway(cfgSnap)
+		if err != nil {
+			return nil, err
+		}
+		return maybeInjectStubClusterForGateways(cInfo, res)
 	case structs.ServiceKindIngressGateway:
-		return s.clustersFromSnapshotIngressGateway(cfgSnap)
+		res, err := s.clustersFromSnapshotIngressGateway(cfgSnap)
+		if err != nil {
+			return nil, err
+		}
+		return maybeInjectStubClusterForGateways(cInfo, res)
 	default:
 		return nil, fmt.Errorf("Invalid service kind: %v", cfgSnap.Kind)
 	}
+}
+
+func maybeInjectStubClusterForGateways(cInfo connectionInfo, resources []proto.Message) ([]proto.Message, error) {
+	switch {
+	case !cInfo.IncrementalXDS:
+		return resources, nil
+	case !cInfo.ProxyFeatures.GatewaysNeedStubClusterWhenEmptyWithIncrementalXDS:
+		return resources, nil
+	case len(resources) > 0:
+		return resources, nil
+	}
+
+	// For some reason Envoy versions prior to 1.16.0 when sent an empty CDS
+	// list via the incremental xDS protocol will correctly ack the message and
+	// just never request LDS resources.
+
+	const stubName = "consul-stub-cluster-working-around-envoy-bug-ignore"
+	return []proto.Message{
+		&envoy_cluster_v3.Cluster{
+			Name: stubName,
+			LoadAssignment: &envoy_endpoint_v3.ClusterLoadAssignment{
+				ClusterName: stubName,
+				Endpoints: []*envoy_endpoint_v3.LocalityLbEndpoints{
+					{LbEndpoints: []*envoy_endpoint_v3.LbEndpoint{}},
+				},
+			},
+		},
+	}, nil
 }
 
 // clustersFromSnapshot returns the xDS API representation of the "clusters"

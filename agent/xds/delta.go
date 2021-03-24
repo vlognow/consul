@@ -191,8 +191,9 @@ func (s *Server) processDelta(stream ADSDeltaStream, reqCh <-chan *envoy_discove
 			logger.Trace("event was new config snapshot")
 
 			cInfo := connectionInfo{
-				Token:         tokenFromContext(stream.Context()),
-				ProxyFeatures: proxyFeatures,
+				Token:          tokenFromContext(stream.Context()),
+				ProxyFeatures:  proxyFeatures,
+				IncrementalXDS: true,
 			}
 			newRes, err := s.allResourcesFromSnapshot(cInfo, cfgSnap)
 			if err != nil {

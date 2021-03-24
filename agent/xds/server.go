@@ -409,8 +409,9 @@ type xDSType struct {
 
 // connectionInfo represents details specific to this connection
 type connectionInfo struct {
-	Token         string
-	ProxyFeatures supportedProxyFeatures
+	Token          string
+	ProxyFeatures  supportedProxyFeatures
+	IncrementalXDS bool
 }
 
 func (t *xDSType) Recv(req *envoy_discovery_v3.DiscoveryRequest, node *envoy_config_core_v3.Node, proxyFeatures supportedProxyFeatures) {
