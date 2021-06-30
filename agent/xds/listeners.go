@@ -1453,8 +1453,8 @@ func makeHTTPFilter(opts listenerFilterOpts) (*envoy_listener_v3.Filter, error) 
 			// sampled.
 			RandomSampling: &envoy_type_v3.Percent{Value: 0.0},
 		},
-		UpgradeConfigs: []*envoyhttp.HttpConnectionManager_UpgradeConfig{
-			&envoyhttp.HttpConnectionManager_UpgradeConfig{
+		UpgradeConfigs: []*envoy_http_v3.HttpConnectionManager_UpgradeConfig{
+			&envoy_http_v3.HttpConnectionManager_UpgradeConfig{
 				UpgradeType: "websocket",
 			},
 		},
