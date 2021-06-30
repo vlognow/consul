@@ -36,15 +36,14 @@ steps:
   pull: always
   commands:
     - cd bin/
-    - zip -r consul_$${consul_version}_linux_amd64_websocketfix.zip .
-    - aws s3 --region us-east-1 cp consul_$${consul_version}_linux_amd64_websocketfix.zip \
-      s3://machinifydeploy/shared/latest/downloads/consul_$${consul_version}_linux_amd64_websocketfix.zip
+    - zip -r consul_1.10.0_linux_amd64_websocketfix.zip .
+    - aws s3 --region us-east-1 cp consul_1.10.0_linux_amd64_websocketfix.zip \
+      s3://machinifydeploy/shared/latest/downloads/consul_1.10.0_linux_amd64_websocketfix.zip
   environment:
     AWS_ACCESS_KEY_ID:
       from_secret: klip_aws_accesskey
     AWS_SECRET_ACCESS_KEY:
       from_secret: klip_aws_secretkey
-    consul_version: "1.10.0"
   depends_on:
     - build consul binary
 
