@@ -37,8 +37,7 @@ steps:
   commands:
     - cd bin/
     - zip -r consul_1.10.0_linux_amd64_websocketfix.zip .
-    - aws s3 --region us-east-1 cp consul_1.10.0_linux_amd64_websocketfix.zip \
-      s3://machinifydeploy/shared/latest/downloads/consul_1.10.0_linux_amd64_websocketfix.zip
+    - aws s3 --region us-east-1 cp consul_1.10.0_linux_amd64_websocketfix.zip s3://machinifydeploy/shared/latest/downloads/consul_1.10.0_linux_amd64_websocketfix.zip
   environment:
     AWS_ACCESS_KEY_ID:
       from_secret: klip_aws_accesskey
