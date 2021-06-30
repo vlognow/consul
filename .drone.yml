@@ -18,12 +18,12 @@ steps:
   image: plugins/ecr
   settings:
     repo: 677637302876.dkr.ecr.us-east-1.amazonaws.com/consul
-    cache_from: 677637302876.dkr.ecr.us-east-1.amazonaws.com/consul:1.9.4-ingress-websocket-fix-latest
+    cache_from: 677637302876.dkr.ecr.us-east-1.amazonaws.com/consul:1.10.0-ingress-websocket-fix-latest
     build_args:
-      - CONSUL_IMAGE_VERSION=1.9.4
+      - CONSUL_IMAGE_VERSION=1.10.0
     dockerfile: build-support/docker/Consul-Dev.dockerfile
     tags:
-      - 1.9.4-ingress-websocket-fix-mfy${DRONE_BUILD_NUMBER}
+      - 1.10.0-ingress-websocket-fix-mfy${DRONE_BUILD_NUMBER}
     access_key:
       from_secret: ecr_accesskey
     secret_key:
@@ -44,7 +44,7 @@ steps:
       from_secret: klip_aws_accesskey
     AWS_SECRET_ACCESS_KEY:
       from_secret: klip_aws_secretkey
-    consul_version: "1.9.4"
+    consul_version: "1.10.0"
   depends_on:
     - build consul binary
 
