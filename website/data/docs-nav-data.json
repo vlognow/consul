@@ -14,10 +14,6 @@
             "path": "intro/vs"
           },
           {
-            "title": "ZooKeeper, doozerd, etcd",
-            "path": "intro/vs/zookeeper"
-          },
-          {
             "title": "Chef, Puppet, etc.",
             "path": "intro/vs/chef-puppet"
           },
@@ -236,7 +232,7 @@
         "path": "connect/intentions-legacy"
       },
       {
-        "title": "Transparent Proxy <sup>Beta</sup>",
+        "title": "Transparent Proxy",
         "path": "connect/transparent-proxy"
       },
       {
@@ -411,6 +407,10 @@
                 "path": "k8s/installation/deployment-configurations/servers-outside-kubernetes"
               },
               {
+                "title": "Single Consul Datacenter in Multiple Kubernetes Clusters",
+                "path": "k8s/installation/deployment-configurations/single-dc-multi-k8s"
+              },
+              {
                 "title": "Consul Enterprise",
                 "path": "k8s/installation/deployment-configurations/consul-enterprise"
               }
@@ -453,6 +453,10 @@
           {
             "title": "Terminating Gateways",
             "path": "k8s/connect/terminating-gateways"
+          },
+          {
+            "title": "Ingress Controllers",
+            "path": "k8s/connect/ingress-controllers"
           },
           {
             "title": "Configuring a Connect CA Provider",
@@ -521,6 +525,10 @@
           {
             "title": "Certificate Rotation",
             "path": "k8s/operations/certificate-rotation"
+          },
+          {
+            "title": "Gossip Encryption Key Rotation",
+            "path": "k8s/operations/gossip-encryption-key-rotation"
           },
           {
             "title": "Configure TLS on an Existing Cluster",
@@ -652,8 +660,39 @@
         "path": "nia/terraform-modules"
       },
       {
+        "title": "Enterprise",
+        "routes": [
+          {
+            "title": "Overview",
+            "path": "nia/enterprise"
+          },
+
+          {
+            "title": "License",
+            "path": "nia/enterprise/license"
+          },
+          {
+            "title": "Terraform Cloud Driver",
+            "href": "/docs/nia/network-drivers/terraform-cloud"
+          }
+        ]
+      },
+      {
         "title": "Network Drivers",
-        "path": "nia/network-drivers"
+        "routes": [
+          {
+            "title": "Overview",
+            "path": "nia/network-drivers"
+          },
+          {
+            "title": "Terraform",
+            "path": "nia/network-drivers/terraform"
+          },
+          {
+            "title": "Terraform Cloud",
+            "path": "nia/network-drivers/terraform-cloud"
+          }
+        ]
       },
       {
         "title": "Compatibility",
@@ -820,16 +859,33 @@
         "path": "enterprise/federation"
       },
       {
-        "title": "Namespaces",
-        "path": "enterprise/namespaces"
-      },
-      {
         "title": "Network Segments",
         "path": "enterprise/network-segments"
       },
       {
+        "title": "Namespaces",
+        "path": "enterprise/namespaces"
+      },
+      {
+        "title": "NIA with TFE",
+        "href": "/docs/nia/enterprise"
+      },
+      {
         "title": "Sentinel",
         "path": "enterprise/sentinel"
+      },
+      {
+        "title": "License",
+        "routes": [
+          {
+            "title": "Overview",
+            "path": "enterprise/license/overview"
+          },
+          {
+            "title": "FAQ",
+            "path": "enterprise/license/faq"
+          }
+        ]
       }
     ]
   },
@@ -926,8 +982,12 @@
             "path": "upgrading/instructions/upgrade-to-1-6-x"
           },
           {
-            "title": "Upgrading to 1.8.10",
+            "title": "Upgrading to 1.8.13",
             "path": "upgrading/instructions/upgrade-to-1-8-x"
+          },
+          {
+            "title": "Upgrading to 1.10.0",
+            "path": "upgrading/instructions/upgrade-to-1-10-x"
           }
         ]
       }
@@ -952,6 +1012,10 @@
       {
         "title": "1.9.0",
         "path": "release-notes/1-9-0"
+      },
+      {
+        "title": "1.10.0",
+        "path": "release-notes/1-10-0"
       }
     ]
   },

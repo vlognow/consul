@@ -2,6 +2,8 @@ package pbcommon
 
 import (
 	"time"
+
+	"github.com/hashicorp/consul/agent/structs"
 )
 
 // IsRead is always true for QueryOption
@@ -97,24 +99,35 @@ func (q *QueryMeta) SetConsistencyLevel(consistencyLevel string) {
 	q.ConsistencyLevel = consistencyLevel
 }
 
+func (q *QueryMeta) GetBackend() structs.QueryBackend {
+	return structs.QueryBackend(0)
+}
+
 // WriteRequest only applies to writes, always false
+//
+// IsRead implements structs.RPCInfo
 func (w WriteRequest) IsRead() bool {
 	return false
 }
 
+// SetTokenSecret implements structs.RPCInfo
 func (w WriteRequest) TokenSecret() string {
 	return w.Token
 }
 
+// SetTokenSecret implements structs.RPCInfo
 func (w *WriteRequest) SetTokenSecret(s string) {
 	w.Token = s
 }
 
 // AllowStaleRead returns whether a stale read should be allowed
+//
+// AllowStaleRead implements structs.RPCInfo
 func (w WriteRequest) AllowStaleRead() bool {
 	return false
 }
 
+// RequestDatacenter implements structs.RPCInfo
 func (td TargetDatacenter) RequestDatacenter() string {
 	return td.Datacenter
 }

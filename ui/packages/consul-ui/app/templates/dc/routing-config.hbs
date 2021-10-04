@@ -1,0 +1,27 @@
+<Route
+  @name={{routeName}}
+  @title={{slug}}
+as |route|>
+
+  <EventSource @src={{chain}} />
+
+  <AppView>
+    <BlockSlot @name="breadcrumbs">
+      <ol>
+          <li><a data-test-back href={{href-to 'dc.services'}}>All Services</a></li>
+      </ol>
+    </BlockSlot>
+    <BlockSlot @name="header">
+      <h1>
+        {{slug}}
+      </h1>
+      <Consul::Source @source={{t "routes.dc.routing-config.source"}} @withInfo={{true}} />
+    </BlockSlot>
+    <BlockSlot @name="content">
+      <Consul::DiscoveryChain
+        @chain={{chain.Chain}}
+      />
+    </BlockSlot>
+  </AppView>
+
+</Route>

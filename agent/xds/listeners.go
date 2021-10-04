@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/consul/agent/connect/ca"
+
 	envoy_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
@@ -249,6 +251,20 @@ func (s *ResourceGenerator) listenersFromSnapshotConnectProxy(cfgSnap *proxycfg.
 			// default config if there is an error so it's safe to continue.
 			s.Logger.Warn("failed to parse", "upstream", u.Identifier(), "error", err)
 		}
+
+		// If escape hatch is present, create a listener from it and move on to the next
+		if cfg.EnvoyListenerJSON != "" {
+			upstreamListener, err := makeListenerFromUserConfig(cfg.EnvoyListenerJSON)
+			if err != nil {
+				s.Logger.Error("failed to parse envoy_listener_json",
+					"upstream", u.Identifier(),
+					"error", err)
+				continue
+			}
+			resources = append(resources, upstreamListener)
+			continue
+		}
+
 		upstreamListener := makeListener(id, u, envoy_core_v3.TrafficDirection_OUTBOUND)
 
 		filterChain, err := s.makeUpstreamFilterChainForDiscoveryChain(
@@ -1742,7 +1758,7 @@ func makeCommonTLSContextFromLeaf(cfgSnap *proxycfg.ConfigSnapshot, leaf *struct
 	// TODO(banks): verify this actually works with Envoy (docs are not clear).
 	rootPEMS := ""
 	for _, root := range cfgSnap.Roots.Roots {
-		rootPEMS += root.RootCert
+		rootPEMS += ca.EnsureTrailingNewline(root.RootCert)
 	}
 
 	return &envoy_tls_v3.CommonTlsContext{
@@ -1751,12 +1767,12 @@ func makeCommonTLSContextFromLeaf(cfgSnap *proxycfg.ConfigSnapshot, leaf *struct
 			{
 				CertificateChain: &envoy_core_v3.DataSource{
 					Specifier: &envoy_core_v3.DataSource_InlineString{
-						InlineString: leaf.CertPEM,
+						InlineString: ca.EnsureTrailingNewline(leaf.CertPEM),
 					},
 				},
 				PrivateKey: &envoy_core_v3.DataSource{
 					Specifier: &envoy_core_v3.DataSource_InlineString{
-						InlineString: leaf.PrivateKeyPEM,
+						InlineString: ca.EnsureTrailingNewline(leaf.PrivateKeyPEM),
 					},
 				},
 			},

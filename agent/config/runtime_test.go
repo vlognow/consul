@@ -5413,7 +5413,6 @@ func TestLoad_FullConfig(t *testing.T) {
 		ExposeMaxPort:         2222,
 		ConnectCAProvider:     "consul",
 		ConnectCAConfig: map[string]interface{}{
-			"RotationPeriod":      "90h",
 			"IntermediateCertTTL": "8760h",
 			"LeafCertTTL":         "1h",
 			"CSRMaxPerSecond":     float64(100),
@@ -5473,7 +5472,7 @@ func TestLoad_FullConfig(t *testing.T) {
 		HTTPSPort:                              15127,
 		HTTPUseCache:                           false,
 		KeyFile:                                "IEkkwgIA",
-		KVMaxValueSize:                         1234567800000000,
+		KVMaxValueSize:                         1234567800,
 		LeaveDrainTime:                         8265 * time.Second,
 		LeaveOnTerm:                            true,
 		Logging: logging.Config{
@@ -5652,9 +5651,10 @@ func TestLoad_FullConfig(t *testing.T) {
 					},
 					Upstreams: structs.Upstreams{
 						{
-							DestinationType: "service", // Default should be explicitly filled
-							DestinationName: "KPtAj2cb",
-							LocalBindPort:   4051,
+							DestinationType:      "service", // Default should be explicitly filled
+							DestinationName:      "KPtAj2cb",
+							DestinationNamespace: defaultEntMeta.NamespaceOrEmpty(),
+							LocalBindPort:        4051,
 							Config: map[string]interface{}{
 								"kzRnZOyd": "nUNKoL8H",
 							},
@@ -5868,7 +5868,7 @@ func TestLoad_FullConfig(t *testing.T) {
 			"wan_ipv4": "78.63.37.19",
 		},
 		TranslateWANAddrs: true,
-		TxnMaxReqLen:      5678000000000000,
+		TxnMaxReqLen:      567800000,
 		UIConfig: UIConfig{
 			Dir:                        "pVncV4Ey",
 			ContentPath:                "/qp1WRhYH/", // slashes are added in parsing
@@ -6594,7 +6594,6 @@ func TestConnectCAConfiguration(t *testing.T) {
 			expected: &structs.CAConfiguration{
 				Provider: "consul",
 				Config: map[string]interface{}{
-					"RotationPeriod":      "2160h",
 					"LeafCertTTL":         "72h",
 					"IntermediateCertTTL": "8760h", // 365 * 24h
 				},
@@ -6611,7 +6610,6 @@ func TestConnectCAConfiguration(t *testing.T) {
 				Provider:  "consul",
 				ClusterID: "adfe7697-09b4-413a-ac0a-fa81ed3a3001",
 				Config: map[string]interface{}{
-					"RotationPeriod":      "2160h",
 					"LeafCertTTL":         "72h",
 					"IntermediateCertTTL": "8760h", // 365 * 24h
 					"cluster_id":          "adfe7697-09b4-413a-ac0a-fa81ed3a3001",
@@ -6635,7 +6633,6 @@ func TestConnectCAConfiguration(t *testing.T) {
 			expected: &structs.CAConfiguration{
 				Provider: "vault",
 				Config: map[string]interface{}{
-					"RotationPeriod":      "2160h",
 					"LeafCertTTL":         "72h",
 					"IntermediateCertTTL": "8760h", // 365 * 24h
 				},
@@ -6651,7 +6648,6 @@ func TestConnectCAConfiguration(t *testing.T) {
 			expected: &structs.CAConfiguration{
 				Provider: "consul",
 				Config: map[string]interface{}{
-					"RotationPeriod":      "2160h",
 					"LeafCertTTL":         "72h",
 					"IntermediateCertTTL": "8760h", // 365 * 24h
 					"foo":                 "bar",

@@ -199,7 +199,7 @@ func TestManager_BasicLifecycle(t *testing.T) {
 			setup: func(t *testing.T, types *TestCacheTypes) {
 				// Note that we deliberately leave the 'geo-cache' prepared query to time out
 				types.health.Set(dbHealthCacheKey, &structs.IndexedCheckServiceNodes{
-					Nodes: TestUpstreamNodes(t),
+					Nodes: TestUpstreamNodes(t, db.Name),
 				})
 				types.compiledChain.Set(dbChainCacheKey, &structs.DiscoveryChainResponse{
 					Chain: dbDefaultChain(),
@@ -225,7 +225,7 @@ func TestManager_BasicLifecycle(t *testing.T) {
 						WatchedUpstreams:       nil, // Clone() clears this out
 						WatchedUpstreamEndpoints: map[string]map[string]structs.CheckServiceNodes{
 							db.String(): {
-								"db.default.dc1": TestUpstreamNodes(t),
+								"db.default.dc1": TestUpstreamNodes(t, db.Name),
 							},
 						},
 						WatchedGateways: nil, // Clone() clears this out
@@ -252,7 +252,7 @@ func TestManager_BasicLifecycle(t *testing.T) {
 			setup: func(t *testing.T, types *TestCacheTypes) {
 				// Note that we deliberately leave the 'geo-cache' prepared query to time out
 				types.health.Set(db_v1_HealthCacheKey, &structs.IndexedCheckServiceNodes{
-					Nodes: TestUpstreamNodes(t),
+					Nodes: TestUpstreamNodes(t, db.Name),
 				})
 				types.health.Set(db_v2_HealthCacheKey, &structs.IndexedCheckServiceNodes{
 					Nodes: TestUpstreamNodesAlternate(t),
@@ -281,7 +281,7 @@ func TestManager_BasicLifecycle(t *testing.T) {
 						WatchedUpstreams:       nil, // Clone() clears this out
 						WatchedUpstreamEndpoints: map[string]map[string]structs.CheckServiceNodes{
 							db.String(): {
-								"v1.db.default.dc1": TestUpstreamNodes(t),
+								"v1.db.default.dc1": TestUpstreamNodes(t, db.Name),
 								"v2.db.default.dc1": TestUpstreamNodesAlternate(t),
 							},
 						},
@@ -556,4 +556,49 @@ func TestManager_deliverLatest(t *testing.T) {
 func testGenCacheKey(req cache.Request) string {
 	info := req.CacheInfo()
 	return path.Join(info.Key, info.Datacenter)
+}
+
+func TestManager_SyncState_DefaultToken(t *testing.T) {
+	types := NewTestCacheTypes(t)
+	c := TestCacheWithTypes(t, types)
+	logger := testutil.Logger(t)
+	tokens := new(token.Store)
+	tokens.UpdateUserToken("default-token", token.TokenSourceConfig)
+
+	state := local.NewState(local.Config{}, logger, tokens)
+	state.TriggerSyncChanges = func() {}
+
+	m, err := NewManager(ManagerConfig{
+		Cache:  c,
+		Health: &health.Client{Cache: c, CacheName: cachetype.HealthServicesName},
+		State:  state,
+		Tokens: tokens,
+		Source: &structs.QuerySource{Datacenter: "dc1"},
+		Logger: logger,
+	})
+	require.NoError(t, err)
+	defer m.Close()
+
+	srv := &structs.NodeService{
+		Kind:    structs.ServiceKindConnectProxy,
+		ID:      "web-sidecar-proxy",
+		Service: "web-sidecar-proxy",
+		Port:    9999,
+		Meta:    map[string]string{},
+		Proxy: structs.ConnectProxyConfig{
+			DestinationServiceID:   "web",
+			DestinationServiceName: "web",
+			LocalServiceAddress:    "127.0.0.1",
+			LocalServicePort:       8080,
+			Config: map[string]interface{}{
+				"foo": "bar",
+			},
+		},
+	}
+
+	err = state.AddServiceWithChecks(srv, nil, "")
+	require.NoError(t, err)
+	m.syncState()
+
+	require.Equal(t, "default-token", m.proxies[srv.CompoundServiceID()].token)
 }

@@ -17,6 +17,7 @@ type Client struct {
 	MaterializerDeps    MaterializerDeps
 	CacheName           string
 	UseStreamingBackend bool
+	QueryOptionDefaults func(options *structs.QueryOptions)
 }
 
 type NetRPC interface {
@@ -38,11 +39,14 @@ func (c *Client) ServiceNodes(
 	req structs.ServiceSpecificRequest,
 ) (structs.IndexedCheckServiceNodes, cache.ResultMeta, error) {
 	if c.useStreaming(req) && (req.QueryOptions.UseCache || req.QueryOptions.MinQueryIndex > 0) {
+		c.QueryOptionDefaults(&req.QueryOptions)
+
 		result, err := c.ViewStore.Get(ctx, c.newServiceRequest(req))
 		if err != nil {
 			return structs.IndexedCheckServiceNodes{}, cache.ResultMeta{}, err
 		}
-		return *result.Value.(*structs.IndexedCheckServiceNodes), cache.ResultMeta{Index: result.Index}, err
+		meta := cache.ResultMeta{Index: result.Index, Hit: result.Cached}
+		return *result.Value.(*structs.IndexedCheckServiceNodes), meta, err
 	}
 
 	out, md, err := c.getServiceNodes(ctx, req)

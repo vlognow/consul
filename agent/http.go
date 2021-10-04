@@ -431,12 +431,20 @@ func (s *HTTPHandlers) wrap(handler endpoint, methods []string) http.HandlerFunc
 		}
 
 		handleErr := func(err error) {
-			httpLogger.Error("Request error",
-				"method", req.Method,
-				"url", logURL,
-				"from", req.RemoteAddr,
-				"error", err,
-			)
+			if req.Context().Err() != nil {
+				httpLogger.Info("Request cancelled",
+					"method", req.Method,
+					"url", logURL,
+					"from", req.RemoteAddr,
+					"error", err)
+			} else {
+				httpLogger.Error("Request error",
+					"method", req.Method,
+					"url", logURL,
+					"from", req.RemoteAddr,
+					"error", err)
+			}
+
 			switch {
 			case isForbidden(err):
 				resp.WriteHeader(http.StatusForbidden)
@@ -723,6 +731,13 @@ func setMeta(resp http.ResponseWriter, m structs.QueryMetaCompat) {
 	setLastContact(resp, m.GetLastContact())
 	setKnownLeader(resp, m.GetKnownLeader())
 	setConsistency(resp, m.GetConsistencyLevel())
+	setQueryBackend(resp, m.GetBackend())
+}
+
+func setQueryBackend(resp http.ResponseWriter, backend structs.QueryBackend) {
+	if b := backend.String(); b != "" {
+		resp.Header().Set("X-Consul-Query-Backend", b)
+	}
 }
 
 // setCacheMeta sets http response headers to indicate cache status.

@@ -638,7 +638,7 @@ func (s *state) run(snap *ConfigSnapshot) {
 		case <-s.ctx.Done():
 			return
 		case u := <-s.ch:
-			s.logger.Trace("A blocking query returned; handling snapshot update")
+			s.logger.Trace("A blocking query returned; handling snapshot update", "correlationID", u.CorrelationID)
 
 			if err := s.handleUpdate(u, snap); err != nil {
 				s.logger.Error("Failed to handle update from watch",
@@ -983,9 +983,17 @@ func (s *state) handleUpdateUpstreams(u cache.UpdateEvent, snap *ConfigSnapshot)
 					snap.Datacenter,
 					snap.Roots.TrustDomain)
 
+				spiffeID := connect.SpiffeIDService{
+					Host:       snap.Roots.TrustDomain,
+					Namespace:  svc.NamespaceOrDefault(),
+					Datacenter: snap.Datacenter,
+					Service:    svc.Name,
+				}
+
 				if _, ok := upstreamsSnapshot.PassthroughUpstreams[svc.String()]; !ok {
 					upstreamsSnapshot.PassthroughUpstreams[svc.String()] = ServicePassthroughAddrs{
-						SNI: sni,
+						SNI:      sni,
+						SpiffeID: spiffeID,
 
 						// Stored in a set because it's possible for these to be duplicated
 						// when the upstream-target is targeted by multiple discovery chains.

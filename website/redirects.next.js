@@ -82,6 +82,11 @@ module.exports = [
     permanent: true,
   },
   {
+    source: '/docs/enterprise/license',
+    destination: '/docs/enterprise/license/overview',
+    permanent: true,
+  },
+  {
     source: '/docs/enterprise/connect-multi-datacenter',
     destination: '/docs/enterprise',
     permanent: true,
@@ -94,6 +99,11 @@ module.exports = [
   },
   {
     source: '/docs/connect/ingress(_|-)gateway',
+    destination: '/docs/connect/gateways/ingress-gateway',
+    permanent: true,
+  },
+  {
+    source: '/docs/connect/ingress-gateways',
     destination: '/docs/connect/gateways/ingress-gateway',
     permanent: true,
   },
@@ -174,11 +184,6 @@ module.exports = [
     permanent: true,
   },
   {
-    source: '/docs/k8s/operations/tls-on-existing-cluster',
-    destination: '/docs/k8s/tls-on-existing-cluster',
-    permanent: true,
-  },
-  {
     source: '/docs/agent/services',
     destination: '/docs/discovery/services',
     permanent: true,
@@ -250,11 +255,6 @@ module.exports = [
   },
   { source: '/intro', destination: '/docs/intro', permanent: true },
   { source: '/intro/vs', destination: '/docs/intro/vs', permanent: true },
-  {
-    source: '/intro/vs/zookeeper',
-    destination: '/docs/intro/vs/zookeeper',
-    permanent: true,
-  },
   {
     source: '/intro/vs/chef-puppet',
     destination: '/docs/intro/vs/chef-puppet',

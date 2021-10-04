@@ -109,11 +109,19 @@ intention:
         name: Precedence
         asc: Ascending
         desc: Descending
+  notice:
+    permissions:
+      body: Permissions are L7 attributes. If any of the following permissions match the request, the Intention will apply. Requests that fail to match any of the provided routes will follow the default ACL policy.
+      footer: Learn more about permissions
 transparent-proxy: Transparent Proxy
 topology-metrics:
   source-type:
-    tooltip: This connection was defined in a proxy registration.
-    text: Defined in proxy registration
+    proxy-registration:
+      tooltip: This connection was defined in a proxy registration.
+      text: Defined in proxy registration
+    routing-config:
+      tooltip: This is not a registered Consul service. It’s a routing configuration that routes traffic to real services in Consul.
+      text: Routing configuration
   notice:
     limited-access:
       header: Limited Access
@@ -151,3 +159,13 @@ topology-metrics:
       header: No traffic
       body: Add "{upstream}" as an explicit upstream of "{downstream}" or set the "{downstream}" proxy to "transparent" mode to enable traffic.
       action: Documentation
+  status:
+    error: Unable to load metrics
+    remote-dc: Unable to fetch metrics for a remote datacenter
+    loading: Loading metrics
+    ingress-gateway: Viewing metrics for Ingress Gateways is not currently supported in the UI.
+source:
+  header: This is not a registered Consul service. It’s a routing configuration that routes traffic to real services in Consul. For more information, read our documentation.
+  menu-title: About Routing Configs
+  links:
+    documentation: Documentation

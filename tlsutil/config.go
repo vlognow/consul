@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/go-multierror"
 
 	"github.com/hashicorp/consul/logging"
 )
@@ -158,19 +159,20 @@ func SpecificDC(dc string, tlsWrap DCWrapper) Wrapper {
 }
 
 type autoTLS struct {
-	manualCAPems         []string
+	extraCAPems          []string
 	connectCAPems        []string
 	cert                 *tls.Certificate
 	verifyServerHostname bool
 }
 
-func (a *autoTLS) caPems() []string {
-	return append(a.manualCAPems, a.connectCAPems...)
-}
-
+// manual stores the TLS CA and cert received from Configurator.Update which
+// generally comes from the agent configuration.
 type manual struct {
 	caPems []string
 	cert   *tls.Certificate
+	// caPool containing only the caPems. This CertPool should be used instead of
+	// the Configurator.caPool when only the Agent TLS CA is allowed.
+	caPool *x509.CertPool
 }
 
 // Configurator holds a Config and is responsible for generating all the
@@ -209,13 +211,6 @@ func NewConfigurator(config Config, logger hclog.Logger) (*Configurator, error) 
 	return c, nil
 }
 
-// CAPems returns the currently loaded CAs in PEM format.
-func (c *Configurator) CAPems() []string {
-	c.RLock()
-	defer c.RUnlock()
-	return append(c.manual.caPems, c.autoTLS.caPems()...)
-}
-
 // ManualCAPems returns the currently loaded CAs in PEM format.
 func (c *Configurator) ManualCAPems() []string {
 	c.RLock()
@@ -240,17 +235,23 @@ func (c *Configurator) Update(config Config) error {
 	if err != nil {
 		return err
 	}
-	pool, err := pool(append(pems, c.autoTLS.caPems()...))
+	caPool, err := newX509CertPool(pems, c.autoTLS.extraCAPems, c.autoTLS.connectCAPems)
 	if err != nil {
 		return err
 	}
-	if err = c.check(config, pool, cert); err != nil {
+	if err = c.check(config, caPool, cert); err != nil {
 		return err
 	}
+	manualCAPool, err := newX509CertPool(pems)
+	if err != nil {
+		return err
+	}
+
 	c.base = &config
 	c.manual.cert = cert
+	c.manual.caPool = manualCAPool
 	c.manual.caPems = pems
-	c.caPool = pool
+	c.caPool = caPool
 	c.version++
 	return nil
 }
@@ -265,7 +266,7 @@ func (c *Configurator) UpdateAutoTLSCA(connectCAPems []string) error {
 	defer c.log("UpdateAutoEncryptCA")
 	defer c.Unlock()
 
-	pool, err := pool(append(c.manual.caPems, append(c.autoTLS.manualCAPems, connectCAPems...)...))
+	pool, err := newX509CertPool(c.manual.caPems, c.autoTLS.extraCAPems, connectCAPems)
 	if err != nil {
 		c.RUnlock()
 		return err
@@ -310,11 +311,11 @@ func (c *Configurator) UpdateAutoTLS(manualCAPems, connectCAPems []string, pub, 
 	c.Lock()
 	defer c.Unlock()
 
-	pool, err := pool(append(c.manual.caPems, append(manualCAPems, connectCAPems...)...))
+	pool, err := newX509CertPool(c.manual.caPems, manualCAPems, connectCAPems)
 	if err != nil {
 		return err
 	}
-	c.autoTLS.manualCAPems = manualCAPems
+	c.autoTLS.extraCAPems = manualCAPems
 	c.autoTLS.connectCAPems = connectCAPems
 	c.autoTLS.cert = &cert
 	c.caPool = pool
@@ -345,11 +346,21 @@ func (c *Configurator) Base() Config {
 	return *c.base
 }
 
-func pool(pems []string) (*x509.CertPool, error) {
+// newX509CertPool loads all the groups of PEM encoded certificates into a
+// single x509.CertPool.
+//
+// The groups argument is a varargs of slices so that callers do not need to
+// append slices together. In some cases append can modify the backing array
+// of the first slice passed to append, which will often result in hard to
+// find bugs. By accepting a varargs of slices we remove the need for the
+// caller to append the groups, which should prevent any such bugs.
+func newX509CertPool(groups ...[]string) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
-	for _, pem := range pems {
-		if !pool.AppendCertsFromPEM([]byte(pem)) {
-			return nil, fmt.Errorf("Couldn't parse PEM %s", pem)
+	for _, group := range groups {
+		for _, pem := range group {
+			if !pool.AppendCertsFromPEM([]byte(pem)) {
+				return nil, fmt.Errorf("failed to parse PEM %s", pem)
+			}
 		}
 	}
 	if len(pool.Subjects()) == 0 {
@@ -718,10 +729,6 @@ func (c *Configurator) IncomingHTTPSConfig() *tls.Config {
 func (c *Configurator) OutgoingTLSConfigForCheck(skipVerify bool, serverName string) *tls.Config {
 	c.log("OutgoingTLSConfigForCheck")
 
-	if serverName == "" {
-		serverName = c.serverNameOrNodeName()
-	}
-
 	if !c.enableAgentTLSForChecks() {
 		return &tls.Config{
 			InsecureSkipVerify: skipVerify,
@@ -729,6 +736,9 @@ func (c *Configurator) OutgoingTLSConfigForCheck(skipVerify bool, serverName str
 		}
 	}
 
+	if serverName == "" {
+		serverName = c.serverNameOrNodeName()
+	}
 	config := c.commonTLSConfig(false)
 	config.InsecureSkipVerify = skipVerify
 	config.ServerName = serverName
@@ -875,15 +885,11 @@ func (c *Configurator) wrapTLSClient(dc string, conn net.Conn) (net.Conn, error)
 		Intermediates: x509.NewCertPool(),
 	}
 
-	certs := tlsConn.ConnectionState().PeerCertificates
-	for i, cert := range certs {
-		if i == 0 {
-			continue
-		}
+	cs := tlsConn.ConnectionState()
+	for _, cert := range cs.PeerCertificates[1:] {
 		opts.Intermediates.AddCert(cert)
 	}
-
-	_, err = certs[0].Verify(opts)
+	_, err = cs.PeerCertificates[0].Verify(opts)
 	if err != nil {
 		tlsConn.Close()
 		return nil, err
@@ -927,6 +933,50 @@ func (c *Configurator) wrapALPNTLSClient(dc, nodeName, alpnProto string, conn ne
 	}
 
 	return tlsConn, nil
+}
+
+// AuthorizeServerConn is used to validate that the connection is being established
+// by a Consul server in the same datacenter.
+//
+// The identity of the connection is checked by verifying that the certificate
+// presented is signed by the Agent TLS CA, and has a DNSName that matches the
+// local ServerSNI name.
+//
+// Note this check is only performed if VerifyServerHostname is enabled, otherwise
+// it does no authorization.
+func (c *Configurator) AuthorizeServerConn(dc string, conn *tls.Conn) error {
+	if !c.VerifyServerHostname() {
+		return nil
+	}
+
+	c.RLock()
+	caPool := c.manual.caPool
+	c.RUnlock()
+
+	expected := c.ServerSNI(dc, "")
+	cs := conn.ConnectionState()
+	var errs error
+	for _, chain := range cs.VerifiedChains {
+		if len(chain) == 0 {
+			continue
+		}
+		opts := x509.VerifyOptions{
+			DNSName:       expected,
+			Intermediates: x509.NewCertPool(),
+			Roots:         caPool,
+			KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		}
+		for _, cert := range cs.PeerCertificates[1:] {
+			opts.Intermediates.AddCert(cert)
+		}
+		_, err := cs.PeerCertificates[0].Verify(opts)
+		if err == nil {
+			return nil
+		}
+		multierror.Append(errs, err)
+	}
+	return fmt.Errorf("AuthorizeServerConn failed certificate validation for certificate with a SAN.DNSName of %v: %w", expected, errs)
+
 }
 
 // ParseCiphers parse ciphersuites from the comma-separated string into

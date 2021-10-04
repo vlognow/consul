@@ -1767,6 +1767,11 @@ func (f *aclFilter) filterTokenStub(token **structs.ACLTokenListStub) {
 
 	if f.authorizer.ACLRead(&entCtx) != acl.Allow {
 		*token = nil
+	} else if f.authorizer.ACLWrite(&entCtx) != acl.Allow {
+		// no write permissions - redact secret
+		clone := *(*token)
+		clone.SecretID = redactedToken
+		*token = &clone
 	}
 }
 
@@ -2241,23 +2246,6 @@ func vetNodeTxnOp(op *structs.TxnNodeOp, rule acl.Authorizer) error {
 	op.FillAuthzContext(&authzContext)
 
 	if rule.NodeWrite(op.Node.Node, &authzContext) != acl.Allow {
-		return acl.ErrPermissionDenied
-	}
-
-	return nil
-}
-
-// vetServiceTxnOp applies the given ACL policy to a service transaction operation.
-func vetServiceTxnOp(op *structs.TxnServiceOp, rule acl.Authorizer) error {
-	// Fast path if ACLs are not enabled.
-	if rule == nil {
-		return nil
-	}
-
-	var authzContext acl.AuthorizerContext
-	op.FillAuthzContext(&authzContext)
-
-	if rule.ServiceWrite(op.Service.Service, &authzContext) != acl.Allow {
 		return acl.ErrPermissionDenied
 	}
 

@@ -314,6 +314,24 @@ func (w *WriteRequest) SetTokenSecret(s string) {
 	w.Token = s
 }
 
+type QueryBackend int
+
+const (
+	QueryBackendBlocking QueryBackend = iota
+	QueryBackendStreaming
+)
+
+func (q QueryBackend) String() string {
+	switch q {
+	case QueryBackendBlocking:
+		return "blocking-query"
+	case QueryBackendStreaming:
+		return "streaming"
+	default:
+		return ""
+	}
+}
+
 // QueryMeta allows a query response to include potentially
 // useful metadata about a query
 type QueryMeta struct {
@@ -338,6 +356,9 @@ type QueryMeta struct {
 	// When NotModified is true, the response will not contain the result of
 	// the query.
 	NotModified bool
+
+	// Backend used to handle this query, either blocking-query or streaming.
+	Backend QueryBackend
 }
 
 // RegisterRequest is used for the Catalog.Register endpoint
@@ -1408,6 +1429,9 @@ type HealthCheck struct {
 	ServiceName string        // optional service name
 	ServiceTags []string      // optional service tags
 	Type        string        // Check type: http/ttl/tcp/etc
+
+	Interval string // from definition
+	Timeout  string // from definition
 
 	// ExposedPort is the port of the exposed Envoy listener representing the
 	// HTTP or GRPC health check of the service.

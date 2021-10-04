@@ -1,3 +1,121 @@
+## 1.10.3 (September 27, 2021)
+
+FEATURES:
+
+* sso/oidc: **(Enterprise only)** Add support for providing acr_values in OIDC auth flow [[GH-11026](https://github.com/hashicorp/consul/issues/11026)]
+
+IMPROVEMENTS:
+
+* audit-logging: **(Enterprise Only)** Audit logs will now include select HTTP headers in each logs payload. Those headers are: `Forwarded`, `Via`, `X-Forwarded-For`, `X-Forwarded-Host` and `X-Forwarded-Proto`. [[GH-11107](https://github.com/hashicorp/consul/issues/11107)]
+* connect: update supported envoy versions to 1.18.4, 1.17.4, 1.16.5 [[GH-10961](https://github.com/hashicorp/consul/issues/10961)]
+* telemetry: Add new metrics for the count of KV entries in the Consul store. [[GH-11090](https://github.com/hashicorp/consul/issues/11090)]
+
+BUG FIXES:
+
+* api: Revert early out errors from license APIs to allow v1.10+ clients to
+manage licenses on older servers [[GH-10952](https://github.com/hashicorp/consul/issues/10952)]
+* connect: Fix upstream listener escape hatch for prepared queries [[GH-11109](https://github.com/hashicorp/consul/issues/11109)]
+* grpc: strip local ACL tokens from RPCs during forwarding if crossing datacenters [[GH-11099](https://github.com/hashicorp/consul/issues/11099)]
+* tls: consider presented intermediates during server connection tls handshake. [[GH-10964](https://github.com/hashicorp/consul/issues/10964)]
+* ui: **(Enterprise Only)** Fix saving intentions with namespaced source/destination [[GH-11095](https://github.com/hashicorp/consul/issues/11095)]
+* ui: Don't show a CRD warning for read-only intentions [[GH-11149](https://github.com/hashicorp/consul/issues/11149)]
+* ui: Ensure routing-config page blocking queries are cleaned up correctly [[GH-10915](https://github.com/hashicorp/consul/issues/10915)]
+* ui: Ignore reported permissions for KV area meaning the KV is always enabled
+for both read/write access if the HTTP API allows. [[GH-10916](https://github.com/hashicorp/consul/issues/10916)]
+* ui: hide create button for policies/roles/namespace if users token has no write permissions to those areas [[GH-10914](https://github.com/hashicorp/consul/issues/10914)]
+* xds: ensure the active streams counters are 64 bit aligned on 32 bit systems [[GH-11085](https://github.com/hashicorp/consul/issues/11085)]
+* xds: fixed a bug where Envoy sidecars could enter a state where they failed to receive xds updates from Consul [[GH-10987](https://github.com/hashicorp/consul/issues/10987)]
+
+## 1.10.2 (August 27, 2021)
+
+SECURITY:
+
+* rpc: authorize raft requests [CVE-2021-37219](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-37219) [[GH-10931](https://github.com/hashicorp/consul/issues/10931)]
+
+FEATURES:
+
+* connect: add support for unix domain socket config via API/CLI [[GH-10758](https://github.com/hashicorp/consul/issues/10758)]
+* ui: Adding support in Topology view for Routing Configurations [[GH-10872](https://github.com/hashicorp/consul/issues/10872)]
+* ui: Create Routing Configurations route and page [[GH-10835](https://github.com/hashicorp/consul/issues/10835)]
+* ui: Splitting up the socket mode and socket path in the Upstreams Instance List [[GH-10581](https://github.com/hashicorp/consul/issues/10581)]
+
+IMPROVEMENTS:
+
+* areas: **(Enterprise only)** Add 15s timeout to opening streams over pooled connections.
+* areas: **(Enterprise only)** Apply backpressure to area gossip packet ingestion when more than 512 packets are waiting to be ingested.
+* areas: **(Enterprise only)** Make implementation of WriteToAddress non-blocking to avoid slowing down memberlist's packetListen routine.
+* checks: Add Interval and Timeout to API response. [[GH-10717](https://github.com/hashicorp/consul/issues/10717)]
+* ci: make changelog-checker only validate PR number against main base [[GH-10844](https://github.com/hashicorp/consul/issues/10844)]
+* ci: upgrade to use Go 1.16.7 [[GH-10856](https://github.com/hashicorp/consul/issues/10856)]
+* deps: update to gogo/protobuf v1.3.2 [[GH-10813](https://github.com/hashicorp/consul/issues/10813)]
+* proxycfg: log correlation IDs for the proxy configuration snapshot's blocking queries. [[GH-10689](https://github.com/hashicorp/consul/issues/10689)]
+
+BUG FIXES:
+
+* acl: fixes a bug that prevented the default user token from being used to authorize service registration for connect proxies. [[GH-10824](https://github.com/hashicorp/consul/issues/10824)]
+* ca: fixed a bug when ca provider fail and provider state is stuck in `INITIALIZING` state. [[GH-10630](https://github.com/hashicorp/consul/issues/10630)]
+* ca: report an error when setting the ca config fail because of an index check. [[GH-10657](https://github.com/hashicorp/consul/issues/10657)]
+* cli: Ensure the metrics endpoint is accessible when Envoy is configured to use
+a non-default admin bind address. [[GH-10757](https://github.com/hashicorp/consul/issues/10757)]
+* cli: Fix a bug which prevented initializing a watch when using a namespaced
+token. [[GH-10795](https://github.com/hashicorp/consul/issues/10795)]
+* cli: Fix broken KV import command on Windows. [[GH-10820](https://github.com/hashicorp/consul/issues/10820)]
+* connect: ensure SAN validation for prepared queries validates against all possible prepared query targets [[GH-10873](https://github.com/hashicorp/consul/issues/10873)]
+* connect: fix crash that would result from multiple instances of a service resolving service config on a single agent. [[GH-10647](https://github.com/hashicorp/consul/issues/10647)]
+* connect: proxy upstreams inherit namespace from service if none are defined. [[GH-10688](https://github.com/hashicorp/consul/issues/10688)]
+* dns: fixes a bug with edns truncation where the response could exceed the size limit in some cases. [[GH-10009](https://github.com/hashicorp/consul/issues/10009)]
+* grpc: ensure that streaming gRPC requests work over mesh gateway based wan federation [[GH-10838](https://github.com/hashicorp/consul/issues/10838)]
+* http: log cancelled requests as such at the INFO level, instead of logging them as errored requests. [[GH-10707](https://github.com/hashicorp/consul/issues/10707)]
+* streaming: set the default wait timeout for health queries [[GH-10707](https://github.com/hashicorp/consul/issues/10707)]
+* txn: fixes Txn.Apply to properly authorize service registrations. [[GH-10798](https://github.com/hashicorp/consul/issues/10798)]
+* ui: Disabling policy form fields from users with 'read' permissions [[GH-10902](https://github.com/hashicorp/consul/issues/10902)]
+* ui: Fix Health Checks in K/V form Lock Sessions Info section [[GH-10767](https://github.com/hashicorp/consul/issues/10767)]
+* ui: Fix dropdown option duplication in the new intentions form [[GH-10706](https://github.com/hashicorp/consul/issues/10706)]
+* ui: Hide all metrics for ingress gateway services [[GH-10858](https://github.com/hashicorp/consul/issues/10858)]
+* ui: Properly encode non-URL safe characters in OIDC responses [[GH-10901](https://github.com/hashicorp/consul/issues/10901)]
+* ui: fixes a bug with some service failovers not showing the routing tab visualization [[GH-10913](https://github.com/hashicorp/consul/issues/10913)]
+
+## 1.10.1 (July 15, 2021)
+
+KNOWN ISSUES:
+
+* The change to enable streaming by default uncovered an incompatibility between streaming and WAN federation over mesh gateways causing traffic to fall back to attempting a direct WAN connection rather than transiting through the gateways. We currently suggest explicitly setting [`use_streaming_backend=false`](https://www.consul.io/docs/agent/options#use_streaming_backend) if using WAN federation over mesh gateways when upgrading to 1.10.1 and are working to address this issue in a future patch release.
+
+SECURITY:
+
+* xds: ensure envoy verifies the subject alternative name for upstreams [CVE-2021-32574](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-32574) [[GH-10621](https://github.com/hashicorp/consul/issues/10621)]
+* xds: ensure single L7 deny intention with default deny policy does not result in allow action [CVE-2021-36213](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-36213) [[GH-10619](https://github.com/hashicorp/consul/issues/10619)]
+
+FEATURES:
+
+* cli: allow running `redirect-traffic` command in a provided Linux namespace. [[GH-10564](https://github.com/hashicorp/consul/issues/10564)]
+* sdk: allow applying `iptables` rules in a provided Linux namespace. [[GH-10564](https://github.com/hashicorp/consul/issues/10564)]
+
+IMPROVEMENTS:
+
+* acl: Return secret ID when listing tokens if accessor has `acl:write` [[GH-10546](https://github.com/hashicorp/consul/issues/10546)]
+* structs: prevent service-defaults upstream configs from using wildcard names or namespaces [[GH-10475](https://github.com/hashicorp/consul/issues/10475)]
+* ui: Move all CSS icons to use standard CSS custom properties rather than SASS variables [[GH-10298](https://github.com/hashicorp/consul/issues/10298)]
+
+DEPRECATIONS:
+
+* connect/ca: remove the `RotationPeriod` field from the Consul CA provider, it was not used for anything. [[GH-10552](https://github.com/hashicorp/consul/issues/10552)]
+
+BUG FIXES:
+
+* agent: fix a panic on 32-bit platforms caused by misaligned struct fields used with sync/atomic. [[GH-10515](https://github.com/hashicorp/consul/issues/10515)]
+* ca: Fixed a bug that returned a malformed certificate chain when the certificate did not having a trailing newline. [[GH-10411](https://github.com/hashicorp/consul/issues/10411)]
+* checks: fixes the default ServerName used with TLS health checks. [[GH-10490](https://github.com/hashicorp/consul/issues/10490)]
+* connect/proxy: fixes logic bug preventing builtin/native proxy from starting upstream listeners [[GH-10486](https://github.com/hashicorp/consul/issues/10486)]
+* streaming: fix a bug that was preventing streaming from being enabled. [[GH-10514](https://github.com/hashicorp/consul/issues/10514)]
+* ui: **(Enterprise only)** Ensure permissions are checked based on the actively selected namespace [[GH-10608](https://github.com/hashicorp/consul/issues/10608)]
+* ui: Ensure in-folder KVs are created in the correct folder [[GH-10569](https://github.com/hashicorp/consul/issues/10569)]
+* ui: Fix KV editor syntax highlighting [[GH-10605](https://github.com/hashicorp/consul/issues/10605)]
+* ui: Send service name down to Stats to properly call endpoint for Upstreams and Downstreams metrics [[GH-10535](https://github.com/hashicorp/consul/issues/10535)]
+* ui: Show ACLs disabled page at Tokens page instead of 403 error when ACLs are disabled [[GH-10604](https://github.com/hashicorp/consul/issues/10604)]
+* ui: Use the token's namespace instead of the default namespace when not
+specifying a namespace in the URL [[GH-10503](https://github.com/hashicorp/consul/issues/10503)]
+
 ## 1.10.0 (June 22, 2021)
 
 BREAKING CHANGES:
@@ -1526,7 +1644,7 @@ SECURITY:
 IMPROVEMENTS:
 
 * build: Bumped Go version to 1.10 [[GH-3988](https://github.com/hashicorp/consul/pull/3988)]
-* agent: Blocking queries on service-specific health and catalog endpoints now return a per-service `X-Consul-Index` improving watch performance on very busy clusters. [[GH-3890](https://github.com/hashicorp/consul/issues/3890)]. **Note this may break blocking clients that relied on undocumented implementation details** as noted in the [upgrade docs](https://github.com/hashicorp/consul/blob/master/website/source/docs/upgrading.html.md#upgrade-from-version-106-to-higher).
+* agent: Blocking queries on service-specific health and catalog endpoints now return a per-service `X-Consul-Index` improving watch performance on very busy clusters. [[GH-3890](https://github.com/hashicorp/consul/issues/3890)]. **Note this may break blocking clients that relied on undocumented implementation details** as noted in the [upgrade docs](https://github.com/hashicorp/consul/blob/main/website/source/docs/upgrading.html.md#upgrade-from-version-106-to-higher).
 * agent: All endpoints now respond to OPTIONS requests. [[GH-3885](https://github.com/hashicorp/consul/issues/3885)]
 * agent: List of supported TLS cipher suites updated to include newer options, [[GH-3962](https://github.com/hashicorp/consul/pull/3962)]
 * agent: WAN federation can now be disabled by setting the serf WAN port to -1. [[GH-3984](https://github.com/hashicorp/consul/issues/3984)]
@@ -1708,12 +1826,12 @@ BREAKING CHANGES:
     | `dogstatsd_tags` | [`telemetry.dogstatsd_tags`](https://www.consul.io/docs/agent/options.html#telemetry-dogstatsd_tags) |
     | `http_api_response_headers` | [`http_config.response_headers`](https://www.consul.io/docs/agent/options.html#response_headers) |
     | `ports.rpc` | None, the RPC server for CLI commands is no longer supported. |
-    | `recursor` | [`recursors`](https://github.com/hashicorp/consul/blob/master/website/source/docs/agent/options.html.md#recursors) |
+    | `recursor` | [`recursors`](https://github.com/hashicorp/consul/blob/main/website/source/docs/agent/options.html.md#recursors) |
     | `retry_join_azure` | [`-retry-join`](https://www.consul.io/docs/agent/options.html#microsoft-azure) |
     | `retry_join_ec2` | [`-retry-join`](https://www.consul.io/docs/agent/options.html#amazon-ec2) |
     | `retry_join_gce` | [`-retry-join`](https://www.consul.io/docs/agent/options.html#google-compute-engine) |
-    | `statsd_addr` | [`telemetry.statsd_address`](https://github.com/hashicorp/consul/blob/master/website/source/docs/agent/options.html.md#telemetry-statsd_address) |
-    | `statsite_addr` | [`telemetry.statsite_address`](https://github.com/hashicorp/consul/blob/master/website/source/docs/agent/options.html.md#telemetry-statsite_address) |
+    | `statsd_addr` | [`telemetry.statsd_address`](https://github.com/hashicorp/consul/blob/main/website/source/docs/agent/options.html.md#telemetry-statsd_address) |
+    | `statsite_addr` | [`telemetry.statsite_address`](https://github.com/hashicorp/consul/blob/main/website/source/docs/agent/options.html.md#telemetry-statsite_address) |
     | `statsite_prefix` | [`telemetry.metrics_prefix`](https://www.consul.io/docs/agent/options.html#telemetry-metrics_prefix) |
     | `telemetry.statsite_prefix` | [`telemetry.metrics_prefix`](https://www.consul.io/docs/agent/options.html#telemetry-metrics_prefix) |
     | (service definitions) `serviceid` | [`service_id`](https://www.consul.io/docs/agent/services.html) |

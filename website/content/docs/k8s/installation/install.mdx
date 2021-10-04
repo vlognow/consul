@@ -54,9 +54,8 @@ manual configuration.
 
 ### Prerequisites
 
-The Consul Helm chart works with Helm 2 and Helm 3. If using Helm 2, you will
-need to install Tiller by following the
-[Helm 2 Installation Guide](https://v2.helm.sh/docs/using_helm/#quickstart-guide).
+The Consul Helm chart works only with Helm 3. Install the latest version of the Helm CLI here:
+[Installing Helm](https://helm.sh/docs/intro/install/).
 
 ### Installing Consul
 
@@ -72,7 +71,7 @@ Ensure you have access to the consul chart:
 ```shell-session
 $ helm search repo hashicorp/consul
 NAME            	CHART VERSION	APP VERSION	DESCRIPTION
-hashicorp/consul	0.20.1       	1.7.2      	Official HashiCorp Consul Chart
+hashicorp/consul	0.32.0       	1.10.0      Official HashiCorp Consul Chart
 ```
 
 Now you're ready to install Consul! To install Consul with the default
@@ -83,8 +82,6 @@ $ helm install consul hashicorp/consul --set global.name=consul
 NAME: consul
 ...
 ```
-
--> If using Helm 2, run: `helm install --name consul hashicorp/consul --set global.name=consul`
 
 _That's it._ The Helm chart does everything to set up a recommended
 Consul-on-Kubernetes deployment.
@@ -101,8 +98,9 @@ or by reading the [Helm Chart Reference](/docs/k8s/helm).
 For example, if you want to enable the [Consul Connect](/docs/k8s/connect) feature,
 use the following config file:
 
+<CodeBlockConfig filename="config.yaml">
+
 ```yaml
-# config.yaml
 global:
   name: consul
 connectInject:
@@ -110,6 +108,8 @@ connectInject:
 controller:
   enabled: true
 ```
+
+</CodeBlockConfig>
 
 Once you've created your `config.yaml` file, run `helm install` with the `-f` flag:
 
@@ -161,7 +161,7 @@ to see all resources and make modifications.
 To retrieve the bootstrap token that has full permissions, run:
 
 ```shell-session
-$ kubectl get secrets/consul-bootstrap-acl-token --template={{.data.token}} | base64 -D
+$ kubectl get secrets/consul-bootstrap-acl-token --template='{{.data.token | base64decode }}'
 e7924dd1-dc3f-f644-da54-81a73ba0a178%
 ```
 
@@ -221,6 +221,8 @@ spec:
 An example `Deployment` is also shown below to show how the host IP can
 be accessed from nested pod specifications:
 
+<CodeBlockConfig highlight="18-28">
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -251,6 +253,8 @@ spec:
               export CONSUL_HTTP_ADDR="${HOST_IP}:8500"
               consul kv put hello world
 ```
+
+</CodeBlockConfig>
 
 ## Architecture
 

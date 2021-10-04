@@ -394,6 +394,8 @@ func New(bd BaseDeps) (*Agent, error) {
 			Conn:   conn,
 			Logger: bd.Logger.Named("rpcclient.health"),
 		},
+		UseStreamingBackend: a.config.UseStreamingBackend,
+		QueryOptionDefaults: config.ApplyDefaultQueryOptions(a.config),
 	}
 
 	a.serviceManager = NewServiceManager(&a)
@@ -557,6 +559,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		Health: a.rpcClientHealth,
 		Logger: a.logger.Named(logging.ProxyConfig),
 		State:  a.State,
+		Tokens: a.baseDeps.Tokens,
 		Source: &structs.QuerySource{
 			Datacenter: a.config.Datacenter,
 			Segment:    a.config.SegmentName,

@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"gopkg.in/square/go-jose.v2/jwt"
 
@@ -366,6 +364,9 @@ type fakeGRPCConnPool struct{}
 
 func (f fakeGRPCConnPool) ClientConn(_ string) (*grpc.ClientConn, error) {
 	return nil, nil
+}
+
+func (f fakeGRPCConnPool) SetGatewayResolver(_ func(string) string) {
 }
 
 func TestAgent_ReconnectConfigWanDisabled(t *testing.T) {
@@ -934,110 +935,6 @@ func testAgent_AddServiceNoRemoteExec(t *testing.T, extraHCL string) {
 	err := a.addServiceFromSource(srv, []*structs.CheckType{chk}, false, "", ConfigSourceRemote)
 	if err == nil || !strings.Contains(err.Error(), "Scripts are disabled on this agent") {
 		t.Fatalf("err: %v", err)
-	}
-}
-
-func TestCacheRateLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("too slow for testing.Short")
-	}
-
-	t.Parallel()
-	tests := []struct {
-		// count := number of updates performed (1 every 10ms)
-		count int
-		// rateLimit rate limiting of cache
-		rateLimit float64
-		// Minimum number of updates to see from a cache perspective
-		// We add a value with tolerance to work even on a loaded CI
-		minUpdates int
-	}{
-		// 250 => we have a test running for at least 2.5s
-		{250, 0.5, 1},
-		{250, 1, 1},
-		{300, 2, 2},
-	}
-	for _, currentTest := range tests {
-		t.Run(fmt.Sprintf("rate_limit_at_%v", currentTest.rateLimit), func(t *testing.T) {
-			tt := currentTest
-			t.Parallel()
-			a := NewTestAgent(t, "cache = { entry_fetch_rate = 1, entry_fetch_max_burst = 100 }")
-			defer a.Shutdown()
-			testrpc.WaitForTestAgent(t, a.RPC, "dc1")
-
-			cfg := a.config
-			require.Equal(t, rate.Limit(1), a.config.Cache.EntryFetchRate)
-			require.Equal(t, 100, a.config.Cache.EntryFetchMaxBurst)
-			cfg.Cache.EntryFetchRate = rate.Limit(tt.rateLimit)
-			cfg.Cache.EntryFetchMaxBurst = 1
-			a.reloadConfigInternal(cfg)
-			require.Equal(t, rate.Limit(tt.rateLimit), a.config.Cache.EntryFetchRate)
-			require.Equal(t, 1, a.config.Cache.EntryFetchMaxBurst)
-			var wg sync.WaitGroup
-			stillProcessing := true
-
-			injectService := func(i int) {
-				srv := &structs.NodeService{
-					Service: "redis",
-					ID:      "redis",
-					Port:    1024 + i,
-					Address: fmt.Sprintf("10.0.1.%d", i%255),
-				}
-
-				err := a.addServiceFromSource(srv, []*structs.CheckType{}, false, "", ConfigSourceRemote)
-				require.Nil(t, err)
-			}
-
-			runUpdates := func() {
-				wg.Add(tt.count)
-				for i := 0; i < tt.count; i++ {
-					time.Sleep(10 * time.Millisecond)
-					injectService(i)
-					wg.Done()
-				}
-				stillProcessing = false
-			}
-
-			getIndex := func(t *testing.T, oldIndex int) int {
-				req, err := http.NewRequest("GET", fmt.Sprintf("/v1/health/service/redis?cached&wait=5s&index=%d", oldIndex), nil)
-				require.NoError(t, err)
-
-				resp := httptest.NewRecorder()
-				a.srv.handler(false).ServeHTTP(resp, req)
-				// Key doesn't actually exist so we should get 404
-				if got, want := resp.Code, http.StatusOK; got != want {
-					t.Fatalf("bad response code got %d want %d", got, want)
-				}
-				index, err := strconv.Atoi(resp.Header().Get("X-Consul-Index"))
-				require.NoError(t, err)
-				return index
-			}
-
-			{
-				start := time.Now()
-				injectService(0)
-				// Get the first index
-				index := getIndex(t, 0)
-				require.Greater(t, index, 2)
-				go runUpdates()
-				numberOfUpdates := 0
-				for stillProcessing {
-					oldIndex := index
-					index = getIndex(t, oldIndex)
-					require.GreaterOrEqual(t, index, oldIndex, "index must be increasing only")
-					numberOfUpdates++
-				}
-				elapsed := time.Since(start)
-				qps := float64(time.Second) * float64(numberOfUpdates) / float64(elapsed)
-				summary := fmt.Sprintf("received %v updates in %v aka %f qps, target max was: %f qps", numberOfUpdates, elapsed, qps, tt.rateLimit)
-
-				// We must never go beyond the limit, we give 10% margin to avoid having values like 1.05 instead of 1 due to precision of clock
-				require.LessOrEqual(t, qps, 1.1*tt.rateLimit, fmt.Sprintf("it should never get more requests than ratelimit, had: %s", summary))
-				// We must have at least being notified a few times
-				require.GreaterOrEqual(t, numberOfUpdates, tt.minUpdates, fmt.Sprintf("It should have received a minimum of %d updates, had: %s", tt.minUpdates, summary))
-			}
-			wg.Wait()
-		})
 	}
 }
 
@@ -2737,6 +2634,7 @@ func TestAgent_PurgeCheckOnDuplicate(t *testing.T) {
 			notes = "my cool notes"
 			args = ["/bin/check-redis.py"]
 			interval = "30s"
+			timeout = "5s"
 		}
 	`})
 	defer a2.Shutdown()
@@ -2753,6 +2651,8 @@ func TestAgent_PurgeCheckOnDuplicate(t *testing.T) {
 		Name:           "memory check",
 		Status:         api.HealthCritical,
 		Notes:          "my cool notes",
+		Interval:       "30s",
+		Timeout:        "5s",
 		EnterpriseMeta: *structs.DefaultEnterpriseMeta(),
 	}
 	require.Equal(t, expected, result)
@@ -4605,6 +4505,9 @@ LOOP:
 }
 
 // This is a mirror of a similar test in agent/consul/server_test.go
+//
+// TODO(rb): implement something similar to this as a full containerized test suite with proper
+// isolation so requests can't "cheat" and bypass the mesh gateways
 func TestAgent_JoinWAN_viaMeshGateway(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
@@ -4852,6 +4755,9 @@ func TestAgent_JoinWAN_viaMeshGateway(t *testing.T) {
 	})
 
 	// Ensure we can do some trivial RPC in all directions.
+	//
+	// NOTE: we explicitly make streaming and non-streaming assertions here to
+	// verify both rpc and grpc codepaths.
 	agents := map[string]*TestAgent{"dc1": a1, "dc2": a2, "dc3": a3}
 	names := map[string]string{"dc1": "bob", "dc2": "betty", "dc3": "bonnie"}
 	for _, srcDC := range []string{"dc1", "dc2", "dc3"} {
@@ -4861,20 +4767,39 @@ func TestAgent_JoinWAN_viaMeshGateway(t *testing.T) {
 				continue
 			}
 			t.Run(srcDC+" to "+dstDC, func(t *testing.T) {
-				req, err := http.NewRequest("GET", "/v1/catalog/nodes?dc="+dstDC, nil)
-				require.NoError(t, err)
+				t.Run("normal-rpc", func(t *testing.T) {
+					req, err := http.NewRequest("GET", "/v1/catalog/nodes?dc="+dstDC, nil)
+					require.NoError(t, err)
 
-				resp := httptest.NewRecorder()
-				obj, err := a.srv.CatalogNodes(resp, req)
-				require.NoError(t, err)
-				require.NotNil(t, obj)
+					resp := httptest.NewRecorder()
+					obj, err := a.srv.CatalogNodes(resp, req)
+					require.NoError(t, err)
+					require.NotNil(t, obj)
 
-				nodes, ok := obj.(structs.Nodes)
-				require.True(t, ok)
-				require.Len(t, nodes, 1)
-				node := nodes[0]
-				require.Equal(t, dstDC, node.Datacenter)
-				require.Equal(t, names[dstDC], node.Node)
+					nodes, ok := obj.(structs.Nodes)
+					require.True(t, ok)
+					require.Len(t, nodes, 1)
+					node := nodes[0]
+					require.Equal(t, dstDC, node.Datacenter)
+					require.Equal(t, names[dstDC], node.Node)
+				})
+				t.Run("streaming-grpc", func(t *testing.T) {
+					req, err := http.NewRequest("GET", "/v1/health/service/consul?cached&dc="+dstDC, nil)
+					require.NoError(t, err)
+
+					resp := httptest.NewRecorder()
+					obj, err := a.srv.HealthServiceNodes(resp, req)
+					require.NoError(t, err)
+					require.NotNil(t, obj)
+
+					csns, ok := obj.(structs.CheckServiceNodes)
+					require.True(t, ok)
+					require.Len(t, csns, 1)
+
+					csn := csns[0]
+					require.Equal(t, dstDC, csn.Node.Datacenter)
+					require.Equal(t, names[dstDC], csn.Node.Node)
+				})
 			})
 		}
 	}
@@ -5015,7 +4940,6 @@ func TestAutoConfig_Integration(t *testing.T) {
 				"LeafCertTTL":         "1h",
 				"PrivateKey":          ca.SigningKey,
 				"RootCert":            ca.RootCert,
-				"RotationPeriod":      "6h",
 				"IntermediateCertTTL": "3h",
 			},
 		},

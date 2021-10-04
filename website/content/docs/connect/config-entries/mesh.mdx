@@ -18,24 +18,50 @@ Settings in this config entry apply across all namespaces and federated datacent
 
 ## Sample Config Entries
 
-### Only allow transparent proxies to dial addresses in the mesh.
+### Mesh Destinations Only
+
+Only allow transparent proxies to dial addresses in the mesh.
 
 <Tabs>
-<Tab heading="HCL">
+<Tab heading="Consul OSS">
+
+<CodeTabs tabs={[ "HCL", "Kubernetes YAML", "JSON" ]}>
 
 ```hcl
-Kind      = "mesh"
-
+Kind = "mesh"
 TransparentProxy {
   MeshDestinationsOnly = true
 }
 ```
 
-</Tab>
-<Tab heading="HCL (Consul Enterprise)">
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: Mesh
+metadata:
+  name: mesh
+spec:
+  transparentProxy:
+    meshDestinationsOnly: true
+```
 
-**NOTE:** The `mesh` config entry can only be created in the `default`
+```json
+{
+  "Kind": "mesh",
+  "TransparentProxy": {
+    "MeshDestinationsOnly": true
+  }
+}
+```
+
+</CodeTabs>
+
+</Tab>
+<Tab heading="Consul Enterprise">
+
+-> **Note**: The `mesh` config entry can only be created in the `default`
 namespace and it will apply to proxies across **all** namespaces.
+
+<CodeTabs tabs={[ "HCL", "Kubernetes YAML", "JSON" ]}>
 
 ```hcl
 Kind      = "mesh"
@@ -46,25 +72,95 @@ TransparentProxy {
 }
 ```
 
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: Mesh
+metadata:
+  name: mesh
+spec:
+  transparentProxy:
+    meshDestinationsOnly: true
+```
+
+```json
+{
+  "Kind": "mesh",
+  "Namespace": "default",
+  "TransparentProxy": {
+    "MeshDestinationsOnly": true
+  }
+}
+```
+
+</CodeTabs>
+
 </Tab>
 </Tabs>
 
 ## Available Fields
 
-- `Kind` - Must be set to `mesh`
-
-- `Namespace` `(string: "default")` <EnterpriseAlert inline /> - Specifies the namespace the config entry will apply to.
-  Must be set to `default`
-
-- `Meta` `(map<string|string>: nil)` - Specifies arbitrary KV metadata pairs.
-
-- `TransparentProxy` `(TransparentProxyConfig: <optional>)` - Controls configuration specific to proxies in
-  `transparent` [mode](/docs/connect/config-entries/service-defaults#mode). Added in v1.10.0.
-
-  - `MeshDestinationsOnly` `(bool: false)` - Determines whether sidecar proxies operating in transparent mode can
-    proxy traffic to IP addresses not registered in Consul's mesh. If enabled, traffic will only be proxied
-    to upstream proxies or Connect-native services. If disabled, requests will be proxied as-is to the
-    original destination IP address. Consul will not encrypt the connection.
+<ConfigEntryReference
+  keys={[
+    {
+      name: 'apiVersion',
+      description: 'Must be set to `consul.hashicorp.com/v1alpha1`',
+      hcl: false,
+    },
+    {
+      name: 'Kind',
+      description: {
+        hcl: 'Must be set to `mesh`',
+        yaml: 'Must be set to `Mesh`',
+      },
+    },
+    {
+      name: 'Namespace',
+      type: `string: "default"`,
+      enterprise: true,
+      description:
+        'Must be set to default. Config will apply to all namespaces.',
+      yaml: false,
+    },
+    {
+      name: 'Meta',
+      type: 'map<string|string>: nil',
+      description:
+        'Specifies arbitrary KV metadata pairs. Added in Consul 1.8.4.',
+      yaml: false,
+    },
+    {
+      name: 'metadata',
+      children: [
+        {
+          name: 'name',
+          description: 'Must be set to `mesh`',
+        },
+        {
+          name: 'namespace',
+          description:
+            'If running Consul Open Source, the namespace is ignored (see [Kubernetes Namespaces in Consul OSS](/docs/k8s/crds#consul-oss)). If running Consul Enterprise see [Kubernetes Namespaces in Consul Enterprise](/docs/k8s/crds#consul-enterprise) for more details.',
+        },
+      ],
+      hcl: false,
+    },
+    {
+      name: 'TransparentProxy',
+      type: 'TransparentProxyConfig: <optional>',
+      description:
+        'Controls configuration specific to proxies in `transparent` [mode](/docs/connect/config-entries/service-defaults#mode). Added in v1.10.0.',
+      children: [
+        {
+          name: 'MeshDestinationsOnly',
+          type: 'bool: false',
+          description: `Determines whether sidecar proxies operating in transparent mode can
+                        proxy traffic to IP addresses not registered in Consul's mesh. If enabled, traffic will only be proxied
+                        to upstream proxies or Connect-native services. If disabled, requests will be proxied as-is to the
+                        original destination IP address. Consul will not encrypt the connection.`,
+        },
+      ],
+    },
+  ]}
+/>
 
 ## ACLs
 
