@@ -311,6 +311,7 @@ func TestDecodeConfigEntry(t *testing.T) {
 							passive_health_check {
 								interval = "2s"
 								max_failures = 3
+								enforce_percent = 100
 							}
 						},
 						{
@@ -352,6 +353,7 @@ func TestDecodeConfigEntry(t *testing.T) {
 							PassiveHealthCheck {
 								MaxFailures = 3
 								Interval = "2s"
+								EnforcePercent = 100
 							}
 						},
 						{
@@ -391,8 +393,9 @@ func TestDecodeConfigEntry(t *testing.T) {
 						{
 							Name: "redis",
 							PassiveHealthCheck: &PassiveHealthCheck{
-								MaxFailures: 3,
-								Interval:    2 * time.Second,
+								MaxFailures:    3,
+								Interval:       2 * time.Second,
+								EnforcePercent: 100,
 							},
 						},
 						{
@@ -2570,15 +2573,17 @@ func TestParseUpstreamConfig(t *testing.T) {
 			name: "passive health check map",
 			input: map[string]interface{}{
 				"passive_health_check": map[string]interface{}{
-					"interval":     "22s",
-					"max_failures": 7,
+					"interval":        "22s",
+					"max_failures":    7,
+					"enforce_percent": 20,
 				},
 			},
 			want: UpstreamConfig{
 				ConnectTimeoutMs: 5000,
 				PassiveHealthCheck: &PassiveHealthCheck{
-					Interval:    22 * time.Second,
-					MaxFailures: 7,
+					Interval:       22 * time.Second,
+					MaxFailures:    7,
+					EnforcePercent: 20,
 				},
 				Protocol: "tcp",
 			},

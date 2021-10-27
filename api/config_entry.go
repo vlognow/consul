@@ -187,6 +187,10 @@ type PassiveHealthCheck struct {
 	// MaxFailures is the count of consecutive failures that results in a host
 	// being removed from the pool.
 	MaxFailures uint32 `alias:"max_failures"`
+
+	// EnforcePercent is the % chance a host will be removed from the pool during
+	// health check analysis sweeps.
+	EnforcePercent uint32 `json:",omitempty" alias:"enforce_percent"`
 }
 
 // UpstreamLimits describes the limits that are associated with a specific
