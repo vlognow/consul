@@ -413,7 +413,8 @@ func TestDecodeConfigEntry(t *testing.T) {
 							"Name": "redis",
 							"PassiveHealthCheck": {
 								"MaxFailures": 3,
-								"Interval": "2s"
+								"Interval": "2s",
+								"EnforcePercent": 100
 							}
 						},
 						{
@@ -435,7 +436,8 @@ func TestDecodeConfigEntry(t *testing.T) {
 						},
 						"PassiveHealthCheck": {
 								"MaxFailures": 5,
-								"Interval": "4s"
+								"Interval": "4s",
+								"EnforcePercent": 20
 						}
 					}
 				}
@@ -463,8 +465,9 @@ func TestDecodeConfigEntry(t *testing.T) {
 						{
 							Name: "redis",
 							PassiveHealthCheck: &PassiveHealthCheck{
-								MaxFailures: 3,
-								Interval:    2 * time.Second,
+								MaxFailures:    3,
+								Interval:       2 * time.Second,
+								EnforcePercent: 100,
 							},
 						},
 						{
@@ -483,8 +486,9 @@ func TestDecodeConfigEntry(t *testing.T) {
 							MaxConcurrentRequests: intPointer(5),
 						},
 						PassiveHealthCheck: &PassiveHealthCheck{
-							MaxFailures: 5,
-							Interval:    4 * time.Second,
+							MaxFailures:    5,
+							Interval:       4 * time.Second,
+							EnforcePercent: 20,
 						},
 					},
 				},

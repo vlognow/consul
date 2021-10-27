@@ -510,6 +510,7 @@ func TestParseConfigEntry(t *testing.T) {
 							passive_health_check {
 								max_failures = 3
 								interval = "2s"
+								enforce_percent = 100
 							}
 							envoy_listener_json = "{ \"listener-foo\": 5 }"
 							envoy_cluster_json = "{ \"cluster-bar\": 5 }"
@@ -541,6 +542,7 @@ func TestParseConfigEntry(t *testing.T) {
 						passive_health_check {
 							max_failures = 5
 							interval = "4s"
+							enforce_percent = 20
 						}
 					}
 				}
@@ -569,6 +571,7 @@ func TestParseConfigEntry(t *testing.T) {
 							PassiveHealthCheck {
 								MaxFailures = 3
 								Interval = "2s"
+								EnforcePercent = 100
 							}
 							EnvoyListenerJson = "{ \"listener-foo\": 5 }"
 							EnvoyClusterJson = "{ \"cluster-bar\": 5 }"
@@ -600,6 +603,7 @@ func TestParseConfigEntry(t *testing.T) {
 						PassiveHealthCheck {
 							MaxFailures = 5
 							Interval = "4s"
+							EnforcePercent = 20
 						}
 					}
 				}
@@ -628,7 +632,8 @@ func TestParseConfigEntry(t *testing.T) {
 							"name": "redis",
 							"passive_health_check": {
 								"max_failures": 3,
-								"interval": "2s"
+								"interval": "2s",
+								"enforce_percent": 100
 							},
 							"envoy_listener_json": "{ \"listener-foo\": 5 }",
 							"envoy_cluster_json": "{ \"cluster-bar\": 5 }",
@@ -659,7 +664,8 @@ func TestParseConfigEntry(t *testing.T) {
 						},
 						"passive_health_check": {
 							"max_failures": 5,
-							"interval": "4s"
+							"interval": "4s",
+							"enforce_percent": 100
 						}
 					}
 				}
@@ -689,7 +695,8 @@ func TestParseConfigEntry(t *testing.T) {
 							"Name": "redis",
 							"PassiveHealthCheck": {
 								"MaxFailures": 3,
-								"Interval": "2s"
+								"Interval": "2s",
+								"EnforcePercent": 100
 							},
 							"EnvoyListenerJson": "{ \"listener-foo\": 5 }",
 							"EnvoyClusterJson": "{ \"cluster-bar\": 5 }",
@@ -720,7 +727,8 @@ func TestParseConfigEntry(t *testing.T) {
 						},
 						"PassiveHealthCheck": {
 							"MaxFailures": 5,
-							"Interval": "4s"
+							"Interval": "4s",
+							"EnforcePercent": 20
 						}
 					}
 				}
@@ -748,8 +756,9 @@ func TestParseConfigEntry(t *testing.T) {
 						{
 							Name: "redis",
 							PassiveHealthCheck: &api.PassiveHealthCheck{
-								MaxFailures: 3,
-								Interval:    2 * time.Second,
+								MaxFailures:    3,
+								Interval:       2 * time.Second,
+								EnforcePercent: 100,
 							},
 							EnvoyListenerJSON: `{ "listener-foo": 5 }`,
 							EnvoyClusterJSON:  `{ "cluster-bar": 5 }`,
@@ -779,8 +788,9 @@ func TestParseConfigEntry(t *testing.T) {
 							MaxConcurrentRequests: intPointer(5),
 						},
 						PassiveHealthCheck: &api.PassiveHealthCheck{
-							MaxFailures: 5,
-							Interval:    4 * time.Second,
+							MaxFailures:    5,
+							Interval:       4 * time.Second,
+							EnforcePercent: 20,
 						},
 					},
 				},

@@ -17,6 +17,7 @@ services {
               passive_health_check {
                 interval = "22s"
                 max_failures = 4
+                enforce_percent = 20
               }
             }
           }
