@@ -888,6 +888,28 @@ type PassiveHealthCheck struct {
 	EnforcePercent uint32 `json:",omitempty" alias:"enforce_percent"`
 }
 
+func (chk *PassiveHealthCheck) UnmarshalJSON(data []byte) (err error) {
+	type Alias PassiveHealthCheck
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(chk),
+	}
+
+	// unmarshal into temporary struct
+	if err := lib.UnmarshalJSON(data, &aux); err != nil {
+		return err
+	}
+
+	// if EnforcePercent is not provided, default it to 100 (envoy default value)
+	if aux.EnforcePercent == 0 {
+		chk.EnforcePercent = 100
+	} else {
+		chk.EnforcePercent = aux.EnforcePercent
+	}
+	return nil
+}
+
 func (chk *PassiveHealthCheck) Clone() *PassiveHealthCheck {
 	if chk == nil {
 		return nil
