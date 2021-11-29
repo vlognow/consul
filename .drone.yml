@@ -8,7 +8,8 @@ steps:
   image: golang:1.16.7
   commands:
     - curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s v2.9.3
-   # - gosec -fmt json -log log.txt ./... | ./codacy-gosec-"v2.9.3" | curl -XPOST -L -H "project-token: $PROJECT_TOKEN" | -H "Content-type: application/json" -d @- | "https://api.codacy.com/2.0/commit/$COMMIT/issuesRemoteResults" | curl -XPOST -L -H "project-token: $PROJECT_TOKEN" | -H "Content-type: application/json" | "https://api.codacy.com/2.0/commit/$COMMIT/resultsFinal"
+    #- gosec -fmt json -log log.txt ./... | ./codacy-gosec-"v2.9.3" | curl -XPOST -L -H "project-token: $PROJECT_TOKEN" -H "Content-type: application/json" -d @- "https://api.codacy.com/2.0/commit/$COMMIT/issuesRemoteResults"
+    - curl -XPOST -L -H "project-token: $PROJECT_TOKEN" -H "Content-type: application/json" "https://api.codacy.com/2.0/commit/$COMMIT/resultsFinal"
     - ./build-support/scripts/build-local.sh -o linux -a amd64
     - cp bin/consul .
   environment:
