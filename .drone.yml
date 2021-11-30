@@ -11,6 +11,8 @@ steps:
     - chmod +x codacy-gosec-0.3.7
     - curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s v2.9.3
     - ./bin/gosec -fmt json -log log.txt ./... | ./codacy-gosec-0.3.7 
+    - curl -XPOST -L -H "project-token: ${PROJECT_TOKEN}" -H "Content-type: application/json" -d @- "https://api.codacy.com/2.0/commit/${DRONE_COMMIT_SHA}/issuesRemoteResults"
+    - curl -XPOST -L -H "project-token: ${PROJECT_TOKEN}" -H "Content-type: application/json" "https://api.codacy.com/2.0/commit/${DRONE_COMMIT_SHA}/resultsFinal"
     - ./build-support/scripts/build-local.sh -o linux -a amd64
     - cp bin/consul .
   environment:
@@ -18,6 +20,8 @@ steps:
     GIT_AUTHOR_NAME: machinify
     GIT_COMMITTER_NAME: machinify
     BASH_ENV: .circleci/bash_env.sh
+    PROJECT_TOKEN:
+      from_secret: codacy_project_token
 - name: build consul docker image
   image: plugins/ecr
   settings:
