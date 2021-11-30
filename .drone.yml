@@ -53,5 +53,6 @@ steps:
 trigger:
   branch:
   - ingress-websocket-fix
+  - DevOps-1162
   event:
   - push
