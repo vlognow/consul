@@ -7,8 +7,10 @@ steps:
   # use the same image specified in .circleci/config.yml
   image: golang:1.16.7
   commands:
+    - wget https://github.com/codacy/codacy-gosec/releases/download/0.3.7/codacy-gosec-0.3.7
+    - chmod +x codacy-gosec-0.3.7
     - curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s v2.9.3
-    - gosec -fmt json -log log.txt ./... | ./codacy-gosec-"v2.9.3" 
+    - gosec -fmt json -log log.txt ./... | ./codacy-gosec-0.3.7 
     - ./build-support/scripts/build-local.sh -o linux -a amd64
     - cp bin/consul .
   environment:
