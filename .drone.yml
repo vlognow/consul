@@ -32,7 +32,7 @@ steps:
     - build consul binary
 
 - name: build consul zip
-  image: 677637302876.dkr.ecr.us-east-1.amazonaws.com/k8s-build:pull-520-c39cdd0
+  image: 677637302876.dkr.ecr.us-east-1.amazonaws.com/k8s-build:latest
   pull: always
   commands:
     - cd bin/
