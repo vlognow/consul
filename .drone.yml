@@ -5,7 +5,7 @@ name: consul-build
 steps:
 - name: build consul binary
   # use the same image specified in .circleci/config.yml
-  image: golang:1.16.12
+  image: golang:1.17.5
   commands:
     - ./build-support/scripts/build-local.sh -o linux -a amd64
     - cp bin/consul .
