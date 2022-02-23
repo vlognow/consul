@@ -65,7 +65,7 @@
     "@glimmer/tracking": "^1.0.0",
     "@hashicorp/ember-cli-api-double": "^3.1.0",
     "@mapbox/rehype-prism": "^0.6.0",
-    "@xstate/fsm": "^1.4.0",
+    "@xstate/fsm": "^1.6.5",
     "a11y-dialog": "^6.0.1",
     "babel-eslint": "^10.0.3",
     "babel-loader": "^8.1.0",
