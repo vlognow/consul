@@ -7,8 +7,7 @@ steps:
   # use the same image specified in .circleci/config.yml
   image: golang:1.18.9
   commands:
-    - GOOS="linux" CGO_ENABLED=0 go build -o "$target" -ldflags "$(GOLDFLAGS)"
-    - ./build-support/scripts/build-local.sh -o linux -a amd64
+    - GOOS="linux" CGO_ENABLED=0 go build -o "bin/consul" -ldflags "$(GOLDFLAGS)"
     - cp bin/consul .
   environment:
     EMAIL: devops@machinify.com
