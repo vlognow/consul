@@ -1,0 +1,53 @@
+kind: pipeline
+type: kubernetes
+name: consul-build
+
+steps:
+- name: build consul binary
+  # use the same image specified in .circleci/config.yml
+  image: golang:1.18.9
+  commands:
+    - ./build-support/scripts/build-local.sh -o linux -a amd64
+    - cp bin/consul .
+  environment:
+    EMAIL: devops@machinify.com
+    GIT_AUTHOR_NAME: machinify
+    GIT_COMMITTER_NAME: machinify
+    BASH_ENV: .circleci/bash_env.sh
+- name: build consul docker image
+  image: plugins/ecr
+  settings:
+    repo: 677637302876.dkr.ecr.us-east-1.amazonaws.com/consul
+    cache_from: 677637302876.dkr.ecr.us-east-1.amazonaws.com/consul:1.12.8-ingress-websocket-fix-latest
+    build_args:
+      - CONSUL_IMAGE_VERSION=1.12.8
+    dockerfile: build-support/docker/Consul-Dev.dockerfile
+    tags:
+      - 1.12.8-ingress-websocket-fix-mfy${DRONE_BUILD_NUMBER}
+    access_key:
+      from_secret: ecr_accesskey
+    secret_key:
+      from_secret: ecr_secretkey
+  depends_on:
+    - build consul binary
+
+- name: build consul zip
+  image: 677637302876.dkr.ecr.us-east-1.amazonaws.com/k8s-build:latest
+  pull: always
+  commands:
+    - cd bin/
+    - zip -r consul_1.12.8_linux_amd64_websocketfix.zip .
+    - aws s3 --region us-east-1 cp consul_1.12.8_linux_amd64_websocketfix.zip s3://machinifydeploy/shared/latest/downloads/consul_1.12.8_linux_amd64_websocketfix.zip
+  environment:
+    AWS_ACCESS_KEY_ID:
+      from_secret: klip_aws_accesskey
+    AWS_SECRET_ACCESS_KEY:
+      from_secret: klip_aws_secretkey
+  depends_on:
+    - build consul binary
+
+trigger:
+  branch:
+  - mfy-1.12.8
+  event:
+  - push
