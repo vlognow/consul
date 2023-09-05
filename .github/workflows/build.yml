@@ -18,7 +18,7 @@ jobs:
       pkg-version: ${{ steps.get-product-version.outputs.pkg-version }}
       shared-ldflags: ${{ steps.shared-ldflags.outputs.shared-ldflags }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Needed to get the appropriate tags
       - name: get product version
@@ -55,7 +55,7 @@ jobs:
 
     name: Go ${{ matrix.go }} ${{ matrix.goos }} ${{ matrix.goarch }} build
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Setup go
         uses: actions/setup-go@v2
@@ -122,7 +122,7 @@ jobs:
       version: ${{needs.get-product-version.outputs.product-version}}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -164,7 +164,7 @@ jobs:
 
     name: Verify ${{ matrix.arch }} linux binary
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Download ${{ matrix.arch  }} zip
         uses: actions/download-artifact@v3
